@@ -59,9 +59,9 @@ scaffolding, extracted and made generic:
 | Concept | What it is | In code |
 |---|---|---|
 | **Section** | A named group of parameters (a frozen dataclass). | `Config` subclass |
-| **Experiment** | One point of the sweep: an ordered set of sections, and the directory tree it owns. | `Experiment`, `ExperimentConfig` |
+| **Experiment** | One point of the sweep: an ordered set of configs, and the directory tree it owns. | `Experiment`, `ExperimentConfig` |
 | **Instance** | One stochastic repetition of an experiment. Has its own seed and its own `results.json`. | `Instance` subclass, implements `run()` |
-| **Laboratory** | Declares the sections and the instance class, expands the sweep, writes the manifest, aggregates. | `Laboratory` subclass |
+| **Laboratory** | Declares the configs and the instance class, expands the sweep, writes the manifest, aggregates. | `Laboratory` subclass |
 
 ```
 Laboratory ── expands the sweep into ──▶ Experiment 0, 1, 2, …
@@ -151,7 +151,7 @@ LABORATORY = "my_lab:WalkLab"
 PARAMS = {
     "seed": 1,
     "num_instances": 20,
-    "walk": grid(dim=[1, 2, 3], n_steps=[100, 400]),   # 6 experiments
+    "walk": grid(dim=[1, 2, 3], n_steps=[100, 400]),  # 6 experiments
     "sampling": {"n_walkers": 500},
 }
 ```
@@ -221,7 +221,7 @@ Example: a method and its options that must stay paired, crossed with an indepen
           * grid(max_iter=[100, 1000]),
 ```
 
-**Across sections** the sweep is the Cartesian product of every section's points. Experiments are
+**Across configs** the sweep is the Cartesian product of every section's points. Experiments are
 numbered in that order, with the **first** section in `sweep_order` varying slowest. By default
 `sweep_order` is the section order; set it explicitly on your `Laboratory` if you need ids to stay
 stable when porting an existing lab.
@@ -231,7 +231,7 @@ instead of silently producing a one-point sweep.
 
 ## How results are organized
 
-The directory of an experiment is built from its sections, in the order of `section_classes`:
+The directory of an experiment is built from its configs, in the order of `section_classes`:
 
 ```
 <ROOT>/
@@ -253,7 +253,7 @@ The directory of an experiment is built from its sections, in the order of `sect
 - **Every prefix of the path is a stage directory**, available as
   `experiment.stage_dir("<section name>")`. Experiments that share a prefix share that
   directory, which is the natural place for a cached artifact (a compiled object, a
-  partitioning, a trained surrogate). **Put the sections whose results you want to share
+  partitioning, a trained surrogate). **Put the configs whose results you want to share
   across the most experiments first.**
 - **A section can shape its own path.** Override `path_parts()` to add readable components,
   for example `(self.family.value, self.hash())` gives `<ROOT>/surface-code/<hash>/…`.
@@ -446,8 +446,18 @@ manifest nobody can load.
 
 ```python
 from mechane import (
-    Config, Experiment, ExperimentConfig, Instance, InstanceOutput, Laboratory,
-    grid, zipped, expand, load_laboratory, stable_hash, to_jsonable,
+    Config,
+    Experiment,
+    ExperimentConfig,
+    Instance,
+    InstanceOutput,
+    Laboratory,
+    grid,
+    zipped,
+    expand,
+    load_laboratory,
+    stable_hash,
+    to_jsonable,
 )
 ```
 
@@ -488,7 +498,7 @@ from mechane import (
 - Results are JSON; large numerical arrays should live in separate files you manage.
 - Every CLI invocation loads all experiment configs from the manifest. That is cheap for
   hundreds of experiments but adds startup cost for very large sweeps.
-- Configuration hashes cover parameters, not code. Version your sections when logic changes.
+- Configuration hashes cover parameters, not code. Version your configs when logic changes.
 
 ## Troubleshooting
 
