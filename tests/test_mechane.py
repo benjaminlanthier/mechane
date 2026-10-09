@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 from click.testing import CliRunner
+
+from mechane import ExperimentConfig, expand, grid, stable_hash, zipped
 from mechane.cli import (
     aggregate_results,
     main,
@@ -14,8 +16,6 @@ from mechane.cli import (
     status,
 )
 from toy import Kind, Model, Solver, ToyLab
-
-from mechane import ExperimentConfig, expand, grid, stable_hash, zipped
 
 
 # --------------------------------------------------------------------------- hashing
@@ -34,7 +34,7 @@ def test_stable_hash_handles_enums_numpy_and_paths():
 def test_hash_exclude_and_enum_coercion():
     a, b = Solver(sigma=1.0, device="cpu"), Solver(sigma=1.0, device="cuda")
     assert a.hash() == b.hash() and a.to_dict() != b.to_dict()
-    assert Model(L=4, kind="uniform").kind is Kind.UNIFORM
+    assert Model(L=4, kind=Kind.UNIFORM).kind is Kind.UNIFORM
     assert Model.from_dict({"L": 4, "kind": "gauss"}) == Model(L=4)
 
 
@@ -52,7 +52,10 @@ def test_grid_zipped_product_chain_and_nesting():
     assert len(zipped(a=[1, 2]) * zipped(b=[1, 2, 3])) == 6
     assert len(zipped(a=[1, 2]) + zipped(a=[9])) == 3
     nested = expand({"name": "x", "params": zipped(n=[1, 2])})
-    assert nested == [{"name": "x", "params": {"n": 1}}, {"name": "x", "params": {"n": 2}}]
+    assert nested == [
+        {"name": "x", "params": {"n": 1}},
+        {"name": "x", "params": {"n": 2}},
+    ]
     assert zipped().points() == [{}]
 
 
@@ -110,7 +113,9 @@ def test_derived_seed_is_stable_when_sweep_grows(tmp_path):
     e_small, e_large = small.experiments[0], large.experiments[1]
     assert e_small.config.experiment_id != e_large.config.experiment_id
     # ... but the same seeds.
-    assert [e_small.instance_seed(i) for i in range(5)] == [e_large.instance_seed(i) for i in range(5)]
+    assert [e_small.instance_seed(i) for i in range(5)] == [
+        e_large.instance_seed(i) for i in range(5)
+    ]
     assert len({e_small.instance_seed(i) for i in range(12)}) == 12
     assert all(0 <= e_small.instance_seed(i) < 2**31 for i in range(12))
 
@@ -157,7 +162,7 @@ def test_full_workflow_through_cli(tmp_path):
     lab = ToyLab.from_manifest(manifest_path)
     record = json.loads(lab.experiment(0).results_path(1).read_text())
     assert {"instance_id", "experiment_id", "seed", "inputs", "outputs", "meta"} <= set(record)
-    assert isinstance(record["inputs"]["first"], list)           # numpy -> list
+    assert isinstance(record["inputs"]["first"], list)  # numpy -> list
     assert "env" not in record and "wall_time_s" in record["meta"]
     assert record["meta"]["packages"]["numpy"]
 
@@ -168,7 +173,12 @@ def test_full_workflow_through_cli(tmp_path):
     # reproducibility: same instance rerun with --overwrite gives identical outputs
     path = lab.experiment(0).results_path(1)
     before = json.loads(path.read_text())["outputs"]
-    assert runner.invoke(simulate, [*mp, "--experiment-id", "0", "--instance-id", "1", "--overwrite"]).exit_code == 0
+    assert (
+        runner.invoke(
+            simulate, [*mp, "--experiment-id", "0", "--instance-id", "1", "--overwrite"]
+        ).exit_code
+        == 0
+    )
     assert json.loads(path.read_text())["outputs"] == before
 
     # status + aggregation
@@ -177,7 +187,12 @@ def test_full_workflow_through_cli(tmp_path):
     assert "experiment    1: 1 done, 0 failed, 3 missing" in r.output
     assert runner.invoke(aggregate_results, mp).exit_code == 0
     agg = json.loads((tmp_path / "out" / "aggregated_results.json").read_text())
-    assert agg["0"]["num_done"] == 4 and set(agg["0"]["instances"]) == {"0", "1", "2", "3"}
+    assert agg["0"]["num_done"] == 4 and set(agg["0"]["instances"]) == {
+        "0",
+        "1",
+        "2",
+        "3",
+    }
     assert agg["1"]["missing"] == [0, 1, 3]
 
     # the umbrella group exposes the same commands
@@ -210,4 +225,4 @@ def test_experiment_config_attribute_access(tmp_path):
     cfg = make_lab(tmp_path).experiments[0].config
     assert isinstance(cfg, ExperimentConfig) and cfg.model == Model(L=2)
     with pytest.raises(AttributeError):
-        cfg.nonexistent
+        cfg.nonexistent  # noqa: B018
