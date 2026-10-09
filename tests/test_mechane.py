@@ -77,11 +77,11 @@ PARAMS = {
 }
 
 
-def make_lab(tmp_path, params=None):
-    return ToyLab.from_params(tmp_path, params or PARAMS)
+def make_lab(tmp_path: Path, params=None):
+    return ToyLab.from_configs(tmp_path, params or PARAMS)
 
 
-def test_from_params_numbering_and_layout(tmp_path):
+def test_from_configs_numbering_and_layout(tmp_path):
     PARAMS_2 = {**PARAMS, "solver": zipped({"n_samples": 50}, sigma=[0.5, 1.0])}
     lab = make_lab(tmp_path, PARAMS_2)
     assert [e.config.experiment_id for e in lab.experiments] == [0, 1, 2, 3]
@@ -95,7 +95,7 @@ def test_from_params_numbering_and_layout(tmp_path):
 
 
 def test_unknown_params_key_is_rejected(tmp_path):
-    with pytest.raises(ValueError, match="Unknown params keys"):
+    with pytest.raises(ValueError, match="Unknown configs keys"):
         make_lab(tmp_path, {**PARAMS, "modle": {}})
 
 
@@ -131,7 +131,7 @@ def test_legacy_seed_matches_original_formula(tmp_path):
 
 
 # --------------------------------------------------------------------------- end to end (CLI)
-def write_params_file(tmp_path):
+def write_params_file(tmp_path: Path):
     f = tmp_path / "params.py"
     f.write_text(
         "from pathlib import Path\n"
@@ -144,7 +144,7 @@ def write_params_file(tmp_path):
     return f
 
 
-def test_full_workflow_through_cli(tmp_path):
+def test_full_workflow_through_cli(tmp_path: Path):
     runner = CliRunner()
     r = runner.invoke(setup_lab, ["--params-file", str(write_params_file(tmp_path))])
     assert r.exit_code == 0, r.output
@@ -199,7 +199,7 @@ def test_full_workflow_through_cli(tmp_path):
     assert runner.invoke(main, ["status", *mp]).exit_code == 0
 
 
-def test_failures_are_isolated_and_traceback_saved(tmp_path):
+def test_failures_are_isolated_and_traceback_saved(tmp_path: Path):
     runner = CliRunner()
     params = write_params_file(tmp_path)
     params.write_text(params.read_text().replace("'sigma': 1.0", "'sigma': -1.0"))

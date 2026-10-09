@@ -226,7 +226,7 @@ numbered in that order, with the **first** section in `sweep_order` varying slow
 `sweep_order` is the section order; set it explicitly on your `Laboratory` if you need ids to stay
 stable when porting an existing lab.
 
-`Laboratory.from_params` rejects unknown top-level keys, so a typo such as `"modle"` fails loudly
+`Laboratory.from_configs` rejects unknown top-level keys, so a typo such as `"modle"` fails loudly
 instead of silently producing a one-point sweep.
 
 ## How results are organized
@@ -466,7 +466,7 @@ from mechane import (
 | `Config` | `hash_exclude`, `path_parts()`, `from_dict()` (inherits enum coercion; if you define `__post_init__`, call `super().__post_init__()`) |
 | `Experiment` | `seed_scheme`, `summarize()`, `aggregate_instance_results()`; provides `stage_dir()`, `instances_dir`, `instance_dir(i)`, `instance_seed(i)`, `iter_results()`, `status()` |
 | `Instance` | `run()` (required); provides `self.experiment`, `self.instance_id`, `self.seed`, `self.rng`, `self.dir` |
-| `Laboratory` | `name`, `section_classes`, `instance_class` (required); `experiment_class`, `sweep_order`, `track_packages`, `default_manifest_path()`, `from_params()` (optional) |
+| `Laboratory` | `name`, `section_classes`, `instance_class` (required); `experiment_class`, `sweep_order`, `track_packages`, `default_manifest_path()`, `from_configs()` (optional) |
 | `load_laboratory(path)` | Rebuilds the right `Laboratory` subclass from a manifest alone |
 | `stable_hash`, `to_jsonable` | The hashing and JSON helpers used throughout, exposed for your own artifacts |
 

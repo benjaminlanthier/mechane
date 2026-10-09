@@ -41,5 +41,5 @@ class ToyInstance(Instance):
 
 class ToyLab(Laboratory):
     name = "toy"
-    section_classes = {"model": Model, "solver": Solver}
+    configs_classes = {"model": Model, "solver": Solver}
     instance_class = ToyInstance

@@ -31,8 +31,7 @@ class Instance(ABC):
         self.instance_id = instance_id
 
     @abstractmethod
-    def run(self) -> InstanceOutput | Mapping[str, Any]:
-        """Do the work. A plain mapping is treated as `outputs`."""
+    def run(self) -> InstanceOutput | Mapping[str, Any]: ...
 
     @property
     def seed(self) -> int:

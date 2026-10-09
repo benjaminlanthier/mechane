@@ -57,8 +57,8 @@ def load_params_file(params_file: Path) -> tuple[Path, type[Laboratory], dict]:
 @PARAMS_PATH
 def setup_lab(params_file: Path) -> None:
     """Expand the sweep in PARAMS_FILE, write the manifest and create the directories."""
-    root, lab_cls, params = load_params_file(params_file)
-    lab = lab_cls.from_params(root=root, params=params)
+    root, lab_cls, configs = load_params_file(params_file)
+    lab = lab_cls.from_configs(root=root, configs=configs)
     lab.setup()
     click.echo(
         f"[Setup] {lab.num_experiments} experiments x {lab.num_instances} instances. "

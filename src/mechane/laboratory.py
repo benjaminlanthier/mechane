@@ -49,9 +49,7 @@ class Laboratory:
         self.experiments = list(experiments)
         self.num_instances = num_instances
         self.seed = seed
-        self._manifest_path = manifest_path or self.default_manifest_path(
-            self.root, self.experiments
-        )
+        self._manifest_path = manifest_path or self.default_manifest_path(self.root)
         self._by_id = {e.config.experiment_id: e for e in self.experiments}
 
     # ---- construction ---------------------------------------------------------------------
@@ -113,7 +111,7 @@ class Laboratory:
         )
 
     @classmethod
-    def default_manifest_path(cls, root: Path, experiments: Sequence[Experiment]) -> Path:
+    def default_manifest_path(cls, root: Path) -> Path:
         return Path(root) / "manifest.json"
 
     # ---- lookups --------------------------------------------------------------------------
