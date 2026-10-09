@@ -12,10 +12,10 @@ from mechane.serialization import stable_hash
 
 @dataclass(frozen=True)
 class ExperimentConfig:
-    """One point of the parameter space: an ordered collection of named `Config` parameters.
+    """One point of the parameter space: an ordered collection of named `Config` configs.
 
     The order of `configs` is the directory nesting order (see `Experiment.stage_dir`).
-    Parameters are reachable as attributes: `config.code`, `config.noise`, ...
+    Configs are reachable as attributes: `config.code`, `config.noise`, ...
     """
 
     experiment_id: int
