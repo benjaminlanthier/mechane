@@ -21,3 +21,13 @@ dev = ["pytest>=8", "ruff", "mypy", "ty>=0.0.85", "pre-commit"]
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
+# Declarative class-level registries (`section_classes = {...}`) are intentional, not mutable defaults.
+ignore = ["RUF012"]
