@@ -300,7 +300,7 @@ Each `results.json` holds:
   "inputs":  { ... },     // what was sampled or generated
   "outputs": { ... },     // what was measured
   "meta": {
-    "hostname": "...", "platform": "...", "python": "3.12.3",
+    "hostname": "...", "platform": "...", "python": "3.13.8",
     "packages": {"mechane": "0.1.0", "numpy": "..."},   // see Laboratory.track_packages
     "slurm": {"SLURM_JOB_ID": "...", "SLURM_ARRAY_TASK_ID": "..."},
     "git": {"commit": "...", "dirty": false},           // null if not in a git repo
