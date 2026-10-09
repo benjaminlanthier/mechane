@@ -17,7 +17,7 @@ from mechane.serialization import to_jsonable
 
 
 @dataclass
-class InstanceResult:
+class InstanceOutput:
     inputs: dict[str, Any] = field(default_factory=dict)   # what was sampled / generated
     outputs: dict[str, Any] = field(default_factory=dict)  # what was measured
     meta: dict[str, Any] = field(default_factory=dict)     # extra bookkeeping (backend, ...)
@@ -31,7 +31,7 @@ class Instance(ABC):
         self.instance_id = instance_id
 
     @abstractmethod
-    def run(self) -> InstanceResult | Mapping[str, Any]:
+    def run(self) -> InstanceOutput | Mapping[str, Any]:
         """Do the work. A plain mapping is treated as `outputs`."""
 
     @property
@@ -61,8 +61,8 @@ class Instance(ABC):
         t0 = time.perf_counter()
         out = self.run()
         wall = time.perf_counter() - t0
-        if not isinstance(out, InstanceResult):
-            out = InstanceResult(outputs=dict(out))
+        if not isinstance(out, InstanceOutput):
+            out = InstanceOutput(outputs=dict(out))
         return {
             "instance_id": self.instance_id,
             "experiment_id": self.experiment.config.experiment_id,

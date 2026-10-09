@@ -104,7 +104,7 @@ and walk length.
 ```python
 from dataclasses import dataclass
 
-from mechane import Config, Instance, InstanceResult, Laboratory
+from mechane import Config, Instance, InstanceOutput, Laboratory
 import numpy as np
 
 
@@ -127,7 +127,7 @@ class WalkInstance(Instance):
         sampling = self.experiment.config.sampling
         steps = self.rng.choice([-1, 1], size=(sampling.n_walkers, walk.n_steps, walk.dim))
         endpoints = steps.sum(axis=1).astype(sampling.dtype)
-        return InstanceResult(
+        return InstanceOutput(
             inputs={"first_endpoint": endpoints[0]},
             outputs={"msd": float((endpoints**2).sum(axis=1).mean())},
         )
@@ -309,7 +309,7 @@ Each `results.json` holds:
 }
 ```
 
-- `run()` returns an `InstanceResult(inputs=…, outputs=…, meta=…)`, or a plain mapping, which is
+- `run()` returns an `InstanceOutput(inputs=…, outputs=…, meta=…)`, or a plain mapping, which is
   treated as `outputs`. Anything you put in `meta` is merged into the block above.
 - Only an allow-list of environment variables is recorded (SLURM identifiers). The full
   environment is deliberately **not** saved: it bloats files and can leak credentials.
@@ -446,7 +446,7 @@ manifest nobody can load.
 
 ```python
 from mechane import (
-    Config, Experiment, ExperimentConfig, Instance, InstanceResult, Laboratory,
+    Config, Experiment, ExperimentConfig, Instance, InstanceOutput, Laboratory,
     grid, zipped, expand, load_laboratory, stable_hash, to_jsonable,
 )
 ```
@@ -517,7 +517,7 @@ src/mechane/
   config.py        Config: hashing, enum coercion, path parts
   sweep.py         grid / zipped / product / chain
   experiment.py    ExperimentConfig, Experiment: paths, seeds, results, aggregation
-  instance.py      Instance, InstanceResult
+  instance.py      Instance, InstanceOutput
   laboratory.py    Laboratory, manifest, load_laboratory
   registry.py      "module:Class" and entry-point resolution
   runner.py        run one instance (skip, save, traceback)

@@ -2,7 +2,7 @@
 
 from mechane.config import Config
 from mechane.experiment import Experiment, ExperimentConfig
-from mechane.instance import Instance, InstanceResult
+from mechane.instance import Instance, InstanceOutput
 from mechane.laboratory import Laboratory, load_laboratory
 from mechane.serialization import stable_hash, to_jsonable
 from mechane.sweep import Sweep, expand, grid, zipped
@@ -12,7 +12,7 @@ __all__ = [
     "Experiment",
     "ExperimentConfig",
     "Instance",
-    "InstanceResult",
+    "InstanceOutput",
     "Laboratory",
     "Sweep",
     "expand",

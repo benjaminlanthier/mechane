@@ -4,7 +4,7 @@ lattice of size L. Used by the tests and as the template for new labs."""
 from dataclasses import dataclass
 from enum import StrEnum
 
-from mechane import Config, Instance, InstanceResult, Laboratory
+from mechane import Config, Instance, InstanceOutput, Laboratory
 
 
 class Kind(StrEnum):
@@ -33,7 +33,7 @@ class ToyInstance(Instance):
         if solver.sigma < 0:
             raise ValueError("negative sigma")
         x = self.rng.normal(0.0, solver.sigma, size=(solver.n_samples, model.L))
-        return InstanceResult(
+        return InstanceOutput(
             inputs={"first": x[0, :2]},  # numpy array: must serialize
             outputs={"mean_square": float((x**2).mean())},
         )
