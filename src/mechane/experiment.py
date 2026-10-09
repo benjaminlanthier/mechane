@@ -12,21 +12,21 @@ from mechane.serialization import stable_hash
 
 @dataclass(frozen=True)
 class ExperimentConfig:
-    """One point of the parameter space: an ordered collection of named `Config` sections.
+    """One point of the parameter space: an ordered collection of named `Config` parameters.
 
-    The order of `sections` is the directory nesting order (see `Experiment.stage_dir`).
-    Sections are reachable as attributes: `config.code`, `config.noise`, ...
+    The order of `configs` is the directory nesting order (see `Experiment.stage_dir`).
+    Parameters are reachable as attributes: `config.code`, `config.noise`, ...
     """
 
     experiment_id: int
     num_instances: int
     seed: int
-    sections: dict[str, Config]
+    configs: dict[str, Config]
 
     def __getattr__(self, name: str) -> Config:
-        sections = self.__dict__.get("sections")
-        if sections is not None and name in sections:
-            return sections[name]
+        configs = self.__dict__.get("configs")
+        if configs is not None and name in configs:
+            return configs[name]
         raise AttributeError(name)
 
     def to_dict(self) -> dict[str, Any]:
@@ -34,23 +34,23 @@ class ExperimentConfig:
             "experiment_id": self.experiment_id,
             "num_instances": self.num_instances,
             "seed": self.seed,
-            **{name: cfg.to_dict() for name, cfg in self.sections.items()},
+            **{name: cfg.to_dict() for name, cfg in self.configs.items()},
         }
 
     def content_hash(self) -> str:
         """Hash of everything that influences results; independent of `experiment_id`,
         `num_instances` and every section's `hash_exclude` fields."""
-        return stable_hash({name: cfg.hash_payload() for name, cfg in self.sections.items()})
+        return stable_hash({name: cfg.hash_payload() for name, cfg in self.configs.items()})
 
     @classmethod
     def from_dict(
-        cls, data: dict[str, Any], section_classes: dict[str, type[Config]]
+        cls, data: dict[str, Any], configs_classes: dict[str, type[Config]]
     ) -> ExperimentConfig:
         return cls(
             experiment_id=data["experiment_id"],
             num_instances=data["num_instances"],
             seed=data["seed"],
-            sections={name: sc.from_dict(data[name]) for name, sc in section_classes.items()},
+            configs={name: sc.from_dict(data[name]) for name, sc in configs_classes.items()},
         )
 
 
@@ -62,7 +62,7 @@ class Experiment:
     object, a partitioning, ...) and every experiment sharing that prefix shares the artifact.
     """
 
-    #: "derived": seed = hash(base seed, content hash, instance id) -- stable when the sweep changes.
+    #: "derived": seed = hash(base seed, content hash, instance id) - stable when the sweep changes.
     #: "legacy":  seed = hash of the full config dict incl. experiment_id/num_instances, as in the
     #:            original `experiments` package. Use it to keep reproducing existing result trees.
     seed_scheme: ClassVar[Literal["derived", "legacy"]] = "derived"
@@ -74,15 +74,15 @@ class Experiment:
     # ---- paths ----------------------------------------------------------------------------
     def stage_dir(self, section: str) -> Path:
         path = self.root
-        for name, cfg in self.config.sections.items():
+        for name, cfg in self.config.configs.items():
             path = path.joinpath(*cfg.path_parts())
             if name == section:
                 return path
-        raise KeyError(f"No section {section!r}; sections are {list(self.config.sections)}")
+        raise KeyError(f"No section {section!r}; configs are {list(self.config.configs)}")
 
     @property
     def instances_dir(self) -> Path:
-        last = next(reversed(self.config.sections), None)
+        last = next(reversed(self.config.configs), None)
         base = self.stage_dir(last) if last else self.root
         return base / "instances"
 
