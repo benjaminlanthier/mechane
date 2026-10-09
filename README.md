@@ -74,7 +74,7 @@ Instance   ── run() ──▶ results.json
 From GitHub (pin a tag or commit for reproducibility, not `main`):
 
 ```bash
-pip install "mechane @ git+https://github.com/<you>/mechane@v0.1.0"
+pip install "mechane @ git+https://github.com/benjaminlanthier/mechane@v0.1.0"
 ```
 
 With [uv](https://docs.astral.sh/uv/), in your project's `pyproject.toml`:
@@ -84,13 +84,13 @@ With [uv](https://docs.astral.sh/uv/), in your project's `pyproject.toml`:
 dependencies = ["mechane"]
 
 [tool.uv.sources]
-mechane = { git = "https://github.com/<you>/mechane", tag = "v0.1.0" }
+mechane = { git = "https://github.com/benjaminlanthier/mechane", tag = "v0.1.0" }
 ```
 
 From a local checkout (development):
 
 ```bash
-git clone https://github.com/<you>/mechane && cd mechane
+git clone https://github.com/benjaminlanthier/mechane && cd mechane
 pip install -e .
 ```
 
@@ -506,7 +506,7 @@ from mechane import (
 ## Development
 
 ```bash
-git clone https://github.com/<you>/mechane && cd mechane
+git clone https://github.com/benjaminlanthier/mechane && cd mechane
 pip install -e .
 pip install pytest
 pytest
