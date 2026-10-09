@@ -24,12 +24,12 @@ class Laboratory:
 
         class MyLab(Laboratory):
             name = "my-lab"
-            section_classes = {"model": Model, "solver": Solver}   # order = directory nesting
+            configs_classes = {"model": Model, "solver": Solver}   # order = directory nesting
             instance_class = MyInstance
     """
 
     name: ClassVar[str]
-    section_classes: ClassVar[dict[str, type[Config]]]
+    configs_classes: ClassVar[dict[str, type[Config]]]
     instance_class: ClassVar[type[Instance]]
     experiment_class: ClassVar[type[Experiment]] = Experiment
     #: Order in which sections are multiplied to number the experiments. Defaults to the
@@ -49,26 +49,30 @@ class Laboratory:
         self.experiments = list(experiments)
         self.num_instances = num_instances
         self.seed = seed
-        self._manifest_path = manifest_path or self.default_manifest_path(self.root, self.experiments)
+        self._manifest_path = manifest_path or self.default_manifest_path(
+            self.root, self.experiments
+        )
         self._by_id = {e.config.experiment_id: e for e in self.experiments}
 
     # ---- construction ---------------------------------------------------------------------
     @classmethod
-    def from_params(cls, root: Path, params: dict[str, Any]) -> Laboratory:
-        """Build from a params dict: {"seed": ..., "num_instances": ..., <section>: spec, ...}."""
-        allowed = {"seed", "num_instances", *cls.section_classes}
-        unknown = set(params) - allowed
+    def from_configs(cls, root: Path, configs: dict[str, Any]) -> Laboratory:
+        """Build from a configs dict: {"seed": ..., "num_instances": ..., <section>: spec, ...}."""
+        allowed = {"seed", "num_instances", *cls.configs_classes}
+        unknown = set(configs) - allowed
         if unknown:
-            raise ValueError(f"Unknown params keys {sorted(unknown)}; expected a subset of {sorted(allowed)}")
-        seed = params.get("seed", 0)
-        num_instances = params.get("num_instances", 1)
+            raise ValueError(
+                f"Unknown configs keys {sorted(unknown)}; expected a subset of {sorted(allowed)}"
+            )
+        seed = configs.get("seed", 0)
+        num_instances = configs.get("num_instances", 1)
 
-        order = cls.sweep_order or tuple(cls.section_classes)
-        if set(order) != set(cls.section_classes):
-            raise ValueError("sweep_order must list exactly the keys of section_classes")
+        order = cls.sweep_order or tuple(cls.configs_classes)
+        if set(order) != set(cls.configs_classes):
+            raise ValueError("sweep_order must list exactly the keys of configs_classes")
 
         axes = {
-            name: [cls.section_classes[name].from_dict(p) for p in expand(params.get(name, {}))]
+            name: [cls.configs_classes[name].from_dict(p) for p in expand(configs.get(name, {}))]
             for name in order
         }
         experiments = []
@@ -78,12 +82,17 @@ class Laboratory:
                 experiment_id=experiment_id,
                 num_instances=num_instances,
                 seed=seed,
-                sections={n: chosen[n] for n in cls.section_classes},
+                configs={n: chosen[n] for n in cls.configs_classes},
             )
             experiments.append(cls.experiment_class(root=Path(root), config=config))
         if not experiments:
             raise ValueError("The sweep is empty: some section expanded to zero points.")
-        return cls(root=Path(root), experiments=experiments, num_instances=num_instances, seed=seed)
+        return cls(
+            root=Path(root),
+            experiments=experiments,
+            num_instances=num_instances,
+            seed=seed,
+        )
 
     @classmethod
     def from_manifest(cls, manifest_path: Path) -> Laboratory:
@@ -91,7 +100,7 @@ class Laboratory:
         root = Path(manifest["root"])
         experiments = [
             cls.experiment_class(
-                root=root, config=ExperimentConfig.from_dict(data, cls.section_classes)
+                root=root, config=ExperimentConfig.from_dict(data, cls.configs_classes)
             )
             for data in manifest["experiments"].values()
         ]
@@ -112,7 +121,9 @@ class Laboratory:
         try:
             return self._by_id[experiment_id]
         except KeyError:
-            raise KeyError(f"No experiment {experiment_id}; valid ids: 0..{len(self._by_id) - 1}") from None
+            raise KeyError(
+                f"No experiment {experiment_id}; valid ids: 0..{len(self._by_id) - 1}"
+            ) from None
 
     def build_instance(self, experiment_id: int, instance_id: int) -> Instance:
         return self.instance_class(self.experiment(experiment_id), instance_id)
