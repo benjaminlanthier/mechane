@@ -27,7 +27,7 @@ def resolve_laboratory(ref: str) -> type[Laboratory]:
         obj = importlib.import_module(module_name)
         for part in attr.split("."):
             obj = getattr(obj, part)
-        return obj  # type: ignore[return-value]
+        return obj
     entry_points = {ep.name: ep for ep in metadata.entry_points(group=ENTRY_POINT_GROUP)}
     if ref not in entry_points:
         raise KeyError(

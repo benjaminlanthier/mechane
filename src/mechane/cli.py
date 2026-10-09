@@ -20,12 +20,17 @@ MANIFEST_PATH = click.option(
     required=True,
     help="Path to the manifest.json written by `setup`.",
 )
-PARAMS_PATH = click.option("--params-file", type=click.Path(exists=True, dir_okay=False, path_type=Path), required=True)
+PARAMS_PATH = click.option(
+    "--params-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+)
 EXPERIMENT_ID = click.option("--experiment-id", type=click.IntRange(min=0), required=True)
 INSTANCE_ID = click.option("--instance-id", type=click.IntRange(min=0), required=True)
-INSTANCE_IDS = click.option("--instance-ids", type=str, required=True, help="Comma-separated, e.g. 10,11,12")
+INSTANCE_IDS = click.option(
+    "--instance-ids", type=str, required=True, help="Comma-separated, e.g. 10,11,12"
+)
 OVERWRITE = click.option("--overwrite/--no-overwrite", default=False, show_default=True)
-
 
 
 def load_params_file(params_file: Path) -> tuple[Path, type[Laboratory], dict]:
@@ -78,7 +83,11 @@ def simulate(manifest_path: Path, experiment_id: int, instance_id: int, overwrit
 @OVERWRITE
 @click.option("--continue-on-error/--fail-fast", default=True, show_default=True)
 def simulate_batch(
-    manifest_path: Path, experiment_id: int, instance_ids: str, overwrite: bool, continue_on_error: bool
+    manifest_path: Path,
+    experiment_id: int,
+    instance_ids: str,
+    overwrite: bool,
+    continue_on_error: bool,
 ) -> None:
     """Run several instances of one experiment in a single process."""
     ids = [int(i) for i in instance_ids.split(",") if i.strip()]

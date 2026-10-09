@@ -46,7 +46,9 @@ def expand(spec: Sweep | Mapping[str, Any]) -> list[dict[str, Any]]:
         return spec.points()
     if isinstance(spec, Mapping):
         keys = list(spec)
-        choices = [expand(spec[k]) if _has_sweep(spec[k]) else [copy.deepcopy(spec[k])] for k in keys]
+        choices = [
+            expand(spec[k]) if _has_sweep(spec[k]) else [copy.deepcopy(spec[k])] for k in keys
+        ]
         return [dict(zip(keys, combo, strict=True)) for combo in product(*choices)]
     raise TypeError(f"Expected a dict or Sweep, got {type(spec).__name__}")
 
@@ -59,8 +61,14 @@ class _Axes(Sweep):
             raise ValueError(f"Keys given both as fixed values and as axes: {sorted(overlap)}")
         for key, values in axes.items():
             if isinstance(values, (str, bytes, Mapping)) or not hasattr(values, "__iter__"):
-                raise TypeError(f"Axis {key!r} must be a list/tuple/array of values, got {values!r}")
-        self.mode, self.fixed, self.axes = mode, fixed, {k: list(v) for k, v in axes.items()}
+                raise TypeError(
+                    f"Axis {key!r} must be a list/tuple/array of values, got {values!r}"
+                )
+        self.mode, self.fixed, self.axes = (
+            mode,
+            fixed,
+            {k: list(v) for k, v in axes.items()},
+        )
 
     def points(self) -> list[dict[str, Any]]:
         keys = list(self.axes)

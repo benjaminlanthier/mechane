@@ -27,12 +27,20 @@ SLURM_KEYS = (
 def _git_info(directory: str) -> dict[str, Any] | None:
     def git(*args: str) -> str:
         return subprocess.run(
-            ["git", *args], cwd=directory, capture_output=True, text=True, timeout=5, check=True
+            ["git", *args],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
         ).stdout.strip()
 
     try:
-        return {"commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
-    except Exception as e:
+        return {
+            "commit": git("rev-parse", "HEAD"),
+            "dirty": bool(git("status", "--porcelain")),
+        }
+    except Exception:
         return None
 
 
@@ -43,7 +51,9 @@ def _version(package: str) -> str | None:
         return None
 
 
-def collect_provenance(packages: tuple[str, ...] = (), git_dir: Path | None = None) -> dict[str, Any]:
+def collect_provenance(
+    packages: tuple[str, ...] = (), git_dir: Path | None = None
+) -> dict[str, Any]:
     info: dict[str, Any] = {
         "hostname": socket.gethostname(),
         "platform": platform.platform(),

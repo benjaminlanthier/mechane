@@ -8,7 +8,9 @@ import click
 from mechane.laboratory import Laboratory
 
 
-def run_instance(lab: Laboratory, experiment_id: int, instance_id: int, overwrite: bool = False) -> Path | None:
+def run_instance(
+    lab: Laboratory, experiment_id: int, instance_id: int, overwrite: bool = False
+) -> Path | None:
     """Run one instance and persist it. Returns the results path, or None if skipped."""
     instance = lab.build_instance(experiment_id, instance_id)
     if not overwrite and instance.results_file.exists():

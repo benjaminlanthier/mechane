@@ -18,9 +18,9 @@ from mechane.serialization import to_jsonable
 
 @dataclass
 class InstanceOutput:
-    inputs: dict[str, Any] = field(default_factory=dict)   # what was sampled / generated
+    inputs: dict[str, Any] = field(default_factory=dict)  # what was sampled / generated
     outputs: dict[str, Any] = field(default_factory=dict)  # what was measured
-    meta: dict[str, Any] = field(default_factory=dict)     # extra bookkeeping (backend, ...)
+    meta: dict[str, Any] = field(default_factory=dict)  # extra bookkeeping (backend, ...)
 
 
 class Instance(ABC):

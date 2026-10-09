@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from functools import lru_cache
+from functools import cache
 from typing import Any, ClassVar, Self, get_args, get_type_hints
 
 from mechane.serialization import stable_hash, to_jsonable
@@ -26,7 +26,7 @@ def _enum_type(tp: Any) -> type[Enum] | None:
     return None
 
 
-@lru_cache(maxsize=None)
+@cache
 def _enum_fields(cls: type) -> dict[str, type[Enum]]:
     try:
         hints = get_type_hints(cls)
@@ -48,7 +48,6 @@ class Config:
     hash_exclude: ClassVar[tuple[str, ...]] = ()
 
     def __post_init__(self) -> None:
-        # Accept "bb-code" or QECCodeType.BB_CODE alike: always store the Enum member.
         for name, enum_cls in _enum_fields(type(self)).items():
             value = getattr(self, name)
             if value is not None and not isinstance(value, enum_cls):
