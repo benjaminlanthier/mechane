@@ -1,0 +1,39 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest lab and params file that shows the problem, plus the commands you ran.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or traceback
+      description: Include the contents of `job.err` if an instance failed.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: mechane version or commit
+      description: A tag, or the commit recorded in uv.lock.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Python version and OS
+      placeholder: "Python 3.13, Ubuntu 24.04, SLURM 23.11"
+    validations:
+      required: true
