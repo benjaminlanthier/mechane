@@ -11,9 +11,9 @@ from typing import Any
 
 import numpy as np
 
-from mechane.experiment import Experiment
-from mechane.io import atomic_write_json
-from mechane.serialization import to_jsonable
+from mechane.core.experiment import Experiment
+from mechane.utils.io import atomic_write_json
+from mechane.utils.serialization import to_jsonable
 
 
 @dataclass

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from mechane.laboratory import Laboratory
+from mechane.core.laboratory import Laboratory
 
 
 def run_instance(

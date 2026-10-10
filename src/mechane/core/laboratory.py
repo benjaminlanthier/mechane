@@ -7,13 +7,13 @@ from itertools import product
 from pathlib import Path
 from typing import Any, ClassVar
 
-from mechane.config import Config
-from mechane.experiment import Configs, Experiment, ExperimentConfig
-from mechane.instance import Instance
-from mechane.io import atomic_write_json
-from mechane.provenance import collect_provenance
-from mechane.registry import laboratory_ref, resolve_laboratory
-from mechane.sweep import expand
+from mechane.core.config import Config
+from mechane.core.experiment import Configs, Experiment, ExperimentConfig
+from mechane.core.instance import Instance
+from mechane.utils.io import atomic_write_json
+from mechane.utils.provenance import collect_provenance
+from mechane.utils.registry import laboratory_ref, resolve_laboratory
+from mechane.utils.sweep import expand
 
 
 class Laboratory:
