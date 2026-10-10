@@ -9,7 +9,7 @@ from typing import Any, ClassVar, Literal, Self, get_type_hints
 from mechane.core.config import Config
 from mechane.utils.serialization import stable_hash
 
-RESERVED = frozenset({"experiment_id", "num_instances", "seed"})
+RESERVED = frozenset({"experiment_id", "num_instances", "seed", "configs"})
 
 
 @dataclass(frozen=True)
