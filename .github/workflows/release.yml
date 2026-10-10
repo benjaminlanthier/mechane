@@ -1,36 +1,129 @@
 name: Release
 
-# Pushing a tag like v0.1.0 tests the code, builds it, and publishes a GitHub release.
-# (Nothing is uploaded to PyPI: users install from the tag with `uv add ... --tag vX.Y.Z`.)
+# Fully automatic releases, with the version kept in pyproject.toml.
+# After CI succeeds on main:
+#   - if the version in pyproject.toml has no tag yet, it is released as it is (this is how the
+#     first release works, and how you can pick a version by hand: edit it on dev, merge);
+#   - otherwise the version is bumped: patch by default, "#minor" or "#major" in any commit
+#     message since the last release for a minor / major bump.
+# A bump is committed to main (pyproject.toml and uv.lock, marked [skip ci]), then built, tagged
+# and published as a GitHub release. A merge that changes nothing in src/, pyproject.toml or
+# uv.lock (a README edit, say) does not release. Nothing is uploaded to PyPI.
 on:
-  push:
-    tags: ["v*"]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
+    # Only after a green CI run (lint, type-check, tests, wheel smoke test) on main.
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    env:
+      # The exact commit CI validated.
+      SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+          fetch-depth: 0 # every tag and commit: needed for the last release and the messages
+          # The bump is pushed to main with this token. The default one works unless main is
+          # protected; then add a RELEASE_TOKEN secret (a PAT or app token allowed to bypass).
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
 
-      - name: Check that the tag matches the package version
+      - name: Work out the version to release
+        id: next
         run: |
-          VERSION="$(uv version --short)"
-          if [ "v${VERSION}" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match version ${VERSION} in pyproject.toml"
+          # Only the tip of main can receive a bump commit. If main has moved on, the run for
+          # the newer commit will release this one too.
+          if [ "$(git ls-remote origin refs/heads/main | cut -f1)" != "${SHA}" ]; then
+            echo "main has moved on since ${SHA}: the run for its newer commit will release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CURRENT="$(uv version --short)"
+          LAST="v${CURRENT}"
+
+          if ! git rev-parse -q --verify "refs/tags/${LAST}" > /dev/null; then
+            echo "${LAST} has no tag yet: releasing it as it is."
+            BUMP=false
+            NEXT="${CURRENT}"
+          else
+            if [ "$(git rev-list --count "${LAST}..HEAD")" = "0" ]; then
+              echo "Nothing new since ${LAST}."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if git diff --quiet "${LAST}" HEAD -- src pyproject.toml uv.lock; then
+              echo "Nothing in src/, pyproject.toml or uv.lock changed since ${LAST}: no release."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            MESSAGES="$(git log "${LAST}..HEAD" --format=%B)"
+            if grep -qE '#major\b' <<< "${MESSAGES}"; then
+              PART=major
+            elif grep -qE '#minor\b' <<< "${MESSAGES}"; then
+              PART=minor
+            else
+              PART=patch
+            fi
+            BUMP=true
+            NEXT="$(uv version --bump "${PART}" --dry-run --short)"
+            echo "${LAST} -> v${NEXT} (${PART})"
+          fi
+
+          {
+            echo "release=true"
+            echo "bump=${BUMP}"
+            echo "tag=v${NEXT}"
+            echo "version=${NEXT}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Bump the version and commit it
+        if: steps.next.outputs.release == 'true' && steps.next.outputs.bump == 'true'
+        env:
+          VERSION: ${{ steps.next.outputs.version }}
+        run: |
+          uv version "${VERSION}" --no-sync # updates pyproject.toml AND uv.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml uv.lock
+          git commit -m "Release v${VERSION} [skip ci]"
+
+      - name: Build
+        if: steps.next.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.next.outputs.version }}
+        run: |
+          uv build
+          # The wheel must carry exactly the version we are about to publish.
+          BUILT="$(unzip -p dist/*.whl '*.dist-info/METADATA' | sed -n 's/^Version: //p')"
+          if [ "${BUILT}" != "${VERSION}" ]; then
+            echo "::error::The wheel is version ${BUILT}, expected ${VERSION}"
             exit 1
           fi
 
-      - run: uv sync
-      - run: uv run pytest -q
-      - run: uv build
-
-      - name: Create the GitHub release
+      - name: Push the bump and create the GitHub release (this also creates the tag)
+        if: steps.next.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/* --title "${GITHUB_REF_NAME}" --generate-notes
+          TAG: ${{ steps.next.outputs.tag }}
+          BUMP: ${{ steps.next.outputs.bump }}
+        run: |
+          if [ "${BUMP}" = "true" ]; then
+            git push origin HEAD:main # plain push, never forced: it fails if main moved
+          fi
+          gh release create "${TAG}" dist/* \
+            --target "$(git rev-parse HEAD)" --title "${TAG}" --generate-notes
