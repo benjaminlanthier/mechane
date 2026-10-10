@@ -12,7 +12,7 @@ from importlib import metadata
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from mechane.laboratory import Laboratory
+    from mechane.core.laboratory import Laboratory
 
 ENTRY_POINT_GROUP = "mechane.laboratories"
 

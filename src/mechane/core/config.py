@@ -13,7 +13,7 @@ from enum import Enum
 from functools import cache
 from typing import TYPE_CHECKING, Any, ClassVar, Self, get_args, get_type_hints
 
-from mechane.serialization import stable_hash, to_jsonable
+from mechane.utils.serialization import stable_hash, to_jsonable
 
 
 def _enum_type(tp: Any) -> type[Enum] | None:

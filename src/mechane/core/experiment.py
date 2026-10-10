@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass, fields
+from functools import cached_property
 from pathlib import Path
 from typing import Any, ClassVar, Literal, Self, get_type_hints
 
-from mechane.config import Config
-from mechane.serialization import stable_hash
+from mechane.core.config import Config
+from mechane.utils.seeding import SEED_BITS, SEED_MASK, mix31
+from mechane.utils.serialization import stable_hash
 
-RESERVED = frozenset({"experiment_id", "num_instances", "seed"})
+RESERVED = frozenset({"experiment_id", "num_instances", "seed", "configs"})
 
 
 @dataclass(frozen=True)
@@ -123,19 +125,29 @@ class Experiment:
         return self.instances_dir / f"{instance_id:0{self.pad_length}d}"
 
     # ---- seeding --------------------------------------------------------------------------
+    @cached_property
+    def _seed_base(self) -> int:
+        """Starting point of this experiment's seed sequence. Depends on the experiment's
+        content and the user seed only, so it survives sweep growth and `num_instances` changes."""
+        payload = stable_hash({"seed": self.config.seed, "experiment": self.config.content_hash()})
+        return int(payload[:8], 16) & SEED_MASK
+
     def instance_seed(self, instance_id: int) -> int:
-        """Unique, reproducible seed in the signed 32-bit range (some C++ libs bind to `int`)."""
+        """Reproducible seed in [0, 2**31) (some C++ libs bind to a signed `int`).
+
+        "derived": `mix31(base + instance_id)`. Because `mix31` is a bijection, two instances of
+        the same experiment can never share a seed (for `instance_id < 2**31`). Seeds of
+        different experiments are independent in practice, but cannot be guaranteed distinct:
+        31 bits are too few, and a seed must not depend on which other experiments are swept.
+
+        "legacy": the original formula, kept bit-for-bit so old result trees stay reproducible.
+        """
         if self.seed_scheme == "legacy":
             payload = stable_hash({"instance_id": instance_id, **self.config.to_dict()})
-        else:
-            payload = stable_hash(
-                {
-                    "seed": self.config.seed,
-                    "experiment": self.config.content_hash(),
-                    "instance_id": instance_id,
-                }
-            )
-        return int(payload[:8], 16) & 0x7FFFFFFF
+            return int(payload[:8], 16) & SEED_MASK
+        if not 0 <= instance_id < 1 << SEED_BITS:
+            raise ValueError(f"instance_id must be in [0, 2**{SEED_BITS}), got {instance_id}")
+        return mix31(self._seed_base + instance_id)
 
     # ---- results & aggregation -------------------------------------------------------------
     def results_path(self, instance_id: int) -> Path:

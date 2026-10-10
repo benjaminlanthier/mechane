@@ -15,6 +15,7 @@ from mechane.cli import (
     simulate_batch,
     status,
 )
+from mechane.utils.seeding import mix31
 from toy import Kind, Model, Solver, ToyExperiment, ToyLab
 
 
@@ -118,6 +119,39 @@ def test_derived_seed_is_stable_when_sweep_grows(tmp_path):
     ]
     assert len({e_small.instance_seed(i) for i in range(12)}) == 12
     assert all(0 <= e_small.instance_seed(i) < 2**31 for i in range(12))
+
+
+def test_derived_seeds_are_unique_within_an_experiment(tmp_path):
+    lab = make_lab(tmp_path, {**PARAMS, "num_instances": 300_000})
+    exp = lab.experiments[0]
+    seeds = {exp.instance_seed(i) for i in range(300_000)}
+    assert len(seeds) == 300_000  # guaranteed by construction, not just unlikely
+    assert all(0 <= s < 2**31 for s in seeds)
+
+
+def test_derived_seeds_do_not_change_when_num_instances_grows(tmp_path):
+    few = make_lab(tmp_path, {**PARAMS, "num_instances": 5}).experiments[0]
+    many = make_lab(tmp_path, {**PARAMS, "num_instances": 5000}).experiments[0]
+    assert [few.instance_seed(i) for i in range(5)] == [many.instance_seed(i) for i in range(5)]
+
+
+def test_derived_seeds_are_pinned(tmp_path):
+    """Golden values: changing them silently breaks reproducibility of existing results."""
+    exp = make_lab(tmp_path).experiments[0]
+    assert [exp.instance_seed(i) for i in range(4)] == [1769268694, 561964586, 550601940, 184579897]
+
+
+def test_instance_id_must_fit_the_seed_space(tmp_path):
+    exp = make_lab(tmp_path).experiments[0]
+    for bad in (-1, 2**31):
+        with pytest.raises(ValueError, match="instance_id"):
+            exp.instance_seed(bad)
+
+
+def test_mix31_is_injective_and_stays_in_range():
+    n = 2**18
+    out = {mix31(i) for i in range(n)} | {mix31(2**31 - 1 - i) for i in range(n)}
+    assert len(out) == 2 * n and all(0 <= v < 2**31 for v in out)
 
 
 def test_legacy_seed_matches_original_formula(tmp_path):

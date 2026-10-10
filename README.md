@@ -20,6 +20,7 @@ you bring the parameters and a `run()` method.
 - [Concepts](#concepts)
 - [Install](#install)
 - [Quickstart](#quickstart)
+- [Defining a laboratory](#defining-a-laboratory)
 - [Defining sweeps](#defining-sweeps)
 - [How results are organized](#how-results-are-organized)
 - [Reproducibility and seeds](#reproducibility-and-seeds)
@@ -46,12 +47,14 @@ scaffolding, extracted and made generic:
 - **Content-addressed result tree.** The directory of a result is derived from the hash of the
   parameters that affect it, so the same configuration always lands in the same place.
 - **Reproducible seeds.** Each instance gets a seed derived from its identity, not from its
-  position in a loop.
+  position in a loop, and no two instances of an experiment can ever share one.
 - **Manifest-driven jobs.** `mechane setup` writes a manifest once. Every later job rebuilds
   exactly the instance it needs from `(manifest, experiment_id, instance_id)`, so a requeue can
   never silently re-index your sweep.
 - **Safe by default.** Atomic writes, skip-if-done, failure isolation inside batches,
   tracebacks saved next to the instance.
+- **Typed.** Your own classes are linked through ordinary type annotations, so editors and type
+  checkers see your parameters (`config.configs.walk.n_steps`).
 - **No lock-in.** Plain JSON on disk, plain directories, no database, no daemon.
 
 ## Concepts
@@ -59,9 +62,10 @@ scaffolding, extracted and made generic:
 | Concept | What it is | In code |
 |---|---|---|
 | **Section** | A named group of parameters (a frozen dataclass). | `Config` subclass |
-| **Experiment** | One point of the sweep: an ordered set of configs, and the directory tree it owns. | `Experiment`, `ExperimentConfig` |
+| **Configs** | The ordered collection of sections. Its field order is the directory nesting order. | `Configs` subclass |
+| **Experiment** | One point of the sweep: its configs, and the directory tree it owns. | `ExperimentConfig` and `Experiment` subclasses |
 | **Instance** | One stochastic repetition of an experiment. Has its own seed and its own `results.json`. | `Instance` subclass, implements `run()` |
-| **Laboratory** | Declares the configs and the instance class, expands the sweep, writes the manifest, aggregates. | `Laboratory` subclass |
+| **Laboratory** | Points at your experiment and instance classes, expands the sweep, writes the manifest, aggregates. | `Laboratory` subclass |
 
 ```
 Laboratory ── expands the sweep into ──▶ Experiment 0, 1, 2, …
@@ -91,7 +95,7 @@ From a local checkout (development):
 
 ```bash
 git clone https://github.com/benjaminlanthier/mechane && cd mechane
-pip install -e .
+uv sync
 ```
 
 ## Quickstart
@@ -104,8 +108,17 @@ and walk length.
 ```python
 from dataclasses import dataclass
 
-from mechane import Config, Instance, InstanceOutput, Laboratory
 import numpy as np
+
+from mechane import (
+    Config,
+    Configs,
+    Experiment,
+    ExperimentConfig,
+    Instance,
+    InstanceOutput,
+    Laboratory,
+)
 
 
 @dataclass(frozen=True)
@@ -121,10 +134,27 @@ class Sampling(Config):
     hash_exclude = ("dtype",)  # changes how we compute, not what we compute
 
 
+@dataclass(frozen=True)
+class WalkConfigs(Configs):  # field order = directory nesting order
+    walk: Walk
+    sampling: Sampling
+
+
+@dataclass(frozen=True)
+class WalkExperimentConfig(ExperimentConfig):
+    configs: WalkConfigs
+
+
+class WalkExperiment(Experiment):
+    config: WalkExperimentConfig
+
+
 class WalkInstance(Instance):
+    experiment: WalkExperiment
+
     def run(self):
-        walk = self.experiment.config.walk
-        sampling = self.experiment.config.sampling
+        configs = self.experiment.config.configs
+        walk, sampling = configs.walk, configs.sampling
         steps = self.rng.choice([-1, 1], size=(sampling.n_walkers, walk.n_steps, walk.dim))
         endpoints = steps.sum(axis=1).astype(sampling.dtype)
         return InstanceOutput(
@@ -135,7 +165,7 @@ class WalkInstance(Instance):
 
 class WalkLab(Laboratory):
     name = "walk"
-    section_classes = {"walk": Walk, "sampling": Sampling}
+    experiment_class = WalkExperiment
     instance_class = WalkInstance
 ```
 
@@ -188,15 +218,44 @@ for exp in lab.experiments:
 ```
 
 ```
-dim=1 n_steps=100  <msd> =   98.00
-dim=1 n_steps=400  <msd> =  387.39
-dim=2 n_steps=100  <msd> =  199.27
-dim=2 n_steps=400  <msd> =  800.11
-dim=3 n_steps=100  <msd> =  297.77
-dim=3 n_steps=400  <msd> = 1196.95
+dim=1 n_steps=100  <msd> =  100.59
+dim=1 n_steps=400  <msd> =  406.32
+dim=2 n_steps=100  <msd> =  203.24
+dim=2 n_steps=400  <msd> =  800.84
+dim=3 n_steps=100  <msd> =  300.00
+dim=3 n_steps=400  <msd> = 1214.44
 ```
 
 (The theoretical value is `n_steps × dim`.)
+
+## Defining a laboratory
+
+A lab is five small classes. You never repeat a list of sections: each class points at the next
+one through a type annotation, and `mechane` reads them.
+
+| You write | It points at the next class through |
+|---|---|
+| `WalkLab(Laboratory)` | `experiment_class = WalkExperiment` and `instance_class = WalkInstance` |
+| `WalkExperiment(Experiment)` | the annotation `config: WalkExperimentConfig` |
+| `WalkExperimentConfig(ExperimentConfig)` | the annotation `configs: WalkConfigs` |
+| `WalkConfigs(Configs)` | one annotated field per section, e.g. `walk: Walk` (field order = directory nesting order) |
+| `Walk(Config)`, `Sampling(Config)` | their own dataclass fields |
+
+Rules:
+
+- Define the classes at module level. The lab must be importable by reference anyway so that jobs
+  can find it.
+- Every field of your `Configs` subclass must be annotated with a `Config` subclass.
+- Section names cannot be `experiment_id`, `num_instances` or `seed`: those are top-level keys of
+  the parameter dict and of the manifest.
+- Annotate `experiment: WalkExperiment` in your `Instance` subclass so that
+  `self.experiment.config` is fully typed.
+
+**Typed access.** Inside `run()`, read your parameters through
+`self.experiment.config.configs.walk`: every step of that path is a class you wrote, so editors
+and type checkers know the fields. The shorter `self.experiment.config.walk` also works at runtime
+(and `exp.config.walk` outside instances), but type checkers only see a plain `Config`, so use it
+for quick scripts rather than library code.
 
 ## Defining sweeps
 
@@ -231,7 +290,8 @@ instead of silently producing a one-point sweep.
 
 ## How results are organized
 
-The directory of an experiment is built from its configs, in the order of `section_classes`:
+The directory of an experiment is built from its configs, in the field order of your `Configs`
+class:
 
 ```
 <ROOT>/
@@ -271,22 +331,41 @@ member), and serializes enums, dataclasses, numpy scalars/arrays and paths to JS
 
 ## Reproducibility and seeds
 
-Every instance exposes `self.seed` and a ready-made `self.rng` (`numpy.random.Generator`),
-both deterministic, so rerunning an instance reproduces it exactly.
+Every instance exposes `self.seed` and a ready-made `self.rng` (`numpy.random.default_rng(self.seed)`),
+both deterministic, so rerunning an instance reproduces it exactly. The seed is also stored in the
+instance's `results.json`, which is all you need to replay it.
 
-| `seed_scheme` | The seed is a hash of… | Use when |
+| `seed_scheme` | How the seed is built | Use when |
 |---|---|---|
-| `"derived"` (default) | the lab seed, the experiment's content hash, and the instance id | New work. Adding sweep points or changing `num_instances` does **not** change existing seeds. |
-| `"legacy"` | the instance id plus the full experiment config, including `experiment_id` and `num_instances` | You must keep reproducing result trees created by an earlier scheme. |
+| `"derived"` (default) | `mix31(base + instance_id)`, where `base` is a hash of the lab seed and the experiment's content hash | New work. |
+| `"legacy"` | A hash of the instance id plus the full experiment config, including `experiment_id` and `num_instances` | You must keep reproducing result trees created by an earlier scheme. |
 
-Set it on your `Experiment` subclass:
+Properties of the `"derived"` scheme:
+
+- **Unique within an experiment, by construction.** `mix31` is a bijection on 31 bits (a murmur3-style
+  finalizer), so two instances of the same experiment can never share a seed. It also scrambles
+  consecutive ids, so neighbouring seeds look unrelated, which matters for natively seeded code.
+- **Stable.** The seed depends on the experiment's content and the lab seed only. Adding sweep
+  points, reordering them, or increasing `num_instances` does **not** change existing seeds.
+- **Native-friendly.** Seeds lie in `[0, 2**31)`, a non-negative C `int`.
+- **Across experiments: independent, but not guaranteed distinct.** 31 bits are too few for that,
+  and a seed must not depend on which other experiments you sweep. For a sweep of 100 experiments
+  × 1000 instances, a plain 31-bit hash per instance would contain at least one repeated seed about
+  89% of the time (simulated); this scheme does about 0.5% of the time, and never inside an experiment.
+
+The `"legacy"` scheme keeps the original formula bit-for-bit. It guarantees nothing about
+uniqueness.
+
+Set the scheme on your `Experiment` subclass:
 
 ```python
-class MyExperiment(Experiment):
+class WalkExperiment(Experiment):
+    config: WalkExperimentConfig
     seed_scheme = "legacy"
 ```
 
-Seeds are clamped to the signed 32-bit range, since some native libraries bind to a C `int`.
+Changing the scheme changes the seeds of any instance that has not run yet, so do not mix schemes
+inside one result tree.
 
 ## Result files and provenance
 
@@ -296,7 +375,7 @@ Each `results.json` holds:
 {
   "instance_id": 0,
   "experiment_id": 5,
-  "seed": 1114423612,
+  "seed": 1531082473,
   "inputs":  { ... },     // what was sampled or generated
   "outputs": { ... },     // what was measured
   "meta": {
@@ -333,24 +412,27 @@ experiment contributes:
 }
 ```
 
+Running it again refreshes the entry of every experiment in the existing file.
+
 The only experiment-specific part is `Experiment.summarize(result)`, which reduces one result
 record to whatever you want to keep (the default keeps `outputs`):
 
 ```python
 class WalkExperiment(Experiment):
+    config: WalkExperimentConfig
+
     def summarize(self, result):
         return {"msd": result["outputs"]["msd"], "seed": result["seed"]}
 ```
 
-To use it, set `experiment_class = WalkExperiment` on your `Laboratory`. To change the layout of
-the aggregate itself, override `aggregate_instance_results()`. `Experiment.iter_results()` yields
-`(instance_id, record)` for the finished instances, and `Experiment.status()` returns
-`{"done": […], "failed": […], "missing": […]}`.
+`WalkLab.experiment_class` already points at this class, so nothing else is needed. To change the
+layout of the aggregate itself, override `aggregate_instance_results()`.
+`Experiment.iter_results()` yields `(instance_id, record)` for the finished instances, and
+`Experiment.status()` returns `{"done": […], "failed": […], "missing": […]}`.
 
 ## Command-line reference
 
-`mechane <command>`, or the same commands under their own names if your project exposes them
-(for example as `setup_lab`, `simulate`, …, via `[project.scripts]`).
+`mechane <command>` (or `python -m mechane.cli <command>`).
 
 | Command | Purpose | Options |
 |---|---|---|
@@ -366,7 +448,10 @@ Behaviour worth knowing:
 - In `run-batch`, one failing instance does not stop the others (`--continue-on-error`, the
   default). Each failure writes its traceback to that instance's `job.err`, and the command exits
   with status 1 once the batch is finished. A later successful run removes the stale `job.err`.
-- Instance ids outside `0 … num_instances-1` are rejected with a clear error.
+- Instance ids outside `0 … num_instances-1` are rejected, and nothing is written for them. `run`
+  stops with `ValueError: instance_id … is out of range`; `run-batch` checks the whole list up
+  front and exits with a usage error before running any instance.
+- An unknown experiment id fails with the list of valid ids.
 - `setup` is where the sweep is expanded. **Jobs never re-expand it**: they read the manifest.
   If you change `PARAMS`, run `setup` again.
 
@@ -412,7 +497,8 @@ mechane run-batch --manifest-path "$MANIFEST" \
 
 For 6 experiments × 2 batches that is `--array=0-11`. Batching keeps the array under your
 cluster's `MaxArraySize` and amortizes startup time, since the manifest is loaded once per batch.
-The index arithmetic above was checked locally, but the script itself needs your site's modules,
+The index arithmetic above was checked locally (every `(experiment, instance)` pair is covered
+exactly once, including partial last batches), but the script itself needs your site's modules,
 environment activation and partitions.
 
 Practical notes:
@@ -447,11 +533,13 @@ manifest nobody can load.
 ```python
 from mechane import (
     Config,
+    Configs,
     Experiment,
     ExperimentConfig,
     Instance,
     InstanceOutput,
     Laboratory,
+    Sweep,
     grid,
     zipped,
     expand,
@@ -464,19 +552,23 @@ from mechane import (
 | Object | Things you set or override |
 |---|---|
 | `Config` | `hash_exclude`, `path_parts()`, `from_dict()` (inherits enum coercion; if you define `__post_init__`, call `super().__post_init__()`) |
-| `Experiment` | `seed_scheme`, `summarize()`, `aggregate_instance_results()`; provides `stage_dir()`, `instances_dir`, `instance_dir(i)`, `instance_seed(i)`, `iter_results()`, `status()` |
+| `Configs` | One field per section, annotated with its `Config` class. Provides `names()`, `as_dict()`, `section_classes()` |
+| `ExperimentConfig` | Annotate `configs` with your `Configs` class. Holds `experiment_id`, `num_instances`, `seed`; provides `to_dict()`, `content_hash()` |
+| `Experiment` | Annotate `config` with your `ExperimentConfig` class. Set `seed_scheme`, override `summarize()`, `aggregate_instance_results()`; provides `stage_dir()`, `instances_dir`, `instance_dir(i)`, `instance_seed(i)`, `iter_results()`, `status()` |
 | `Instance` | `run()` (required); provides `self.experiment`, `self.instance_id`, `self.seed`, `self.rng`, `self.dir` |
-| `Laboratory` | `name`, `section_classes`, `instance_class` (required); `experiment_class`, `sweep_order`, `track_packages`, `default_manifest_path()`, `from_configs()` (optional) |
+| `Laboratory` | `name`, `experiment_class`, `instance_class` (required); `sweep_order`, `track_packages`, `default_manifest_path()` (optional); provides `from_configs()`, `from_manifest()`, `setup()`, `aggregate_results()`, `section_classes()` |
 | `load_laboratory(path)` | Rebuilds the right `Laboratory` subclass from a manifest alone |
 | `stable_hash`, `to_jsonable` | The hashing and JSON helpers used throughout, exposed for your own artifacts |
 
-`experiment.config.<section>` returns the section object (`experiment.config.walk.n_steps`).
+Internal helpers such as `mechane.utils.io.atomic_write_json` are importable but not part of the
+top-level API.
 
 ## Design notes and limitations
 
 **Guarantees**
 
 - The same configuration always maps to the same directory and the same seeds.
+- No two instances of an experiment share a seed.
 - Sweeps are explicit. No parameter is turned into an axis because of its type.
 - Writes are atomic, and finished work is never redone unless asked.
 - No import side effects, global registries or hidden state: labs are found by an explicit
@@ -493,8 +585,10 @@ from mechane import (
 
 - No built-in hook for building a stage artifact once and sharing it safely. You can use
   `stage_dir()` for the location, but if several instances may create the same artifact
-  concurrently, write it to a temporary name and rename it (as `mechane.io.atomic_write_json` does
-  for JSON).
+  concurrently, write it to a temporary name and rename it (as `mechane.utils.io.atomic_write_json`
+  does for JSON).
+- Seeds of *different* experiments can coincide with small probability (see
+  [Reproducibility and seeds](#reproducibility-and-seeds)).
 - Results are JSON; large numerical arrays should live in separate files you manage.
 - Every CLI invocation loads all experiment configs from the manifest. That is cheap for
   hundreds of experiments but adds startup cost for very large sweeps.
@@ -507,9 +601,15 @@ from mechane import (
 | `ModuleNotFoundError: my_lab` when running `mechane …` | The console script does not put the current directory on `sys.path`. Install your lab as a package, or `export PYTHONPATH=$PWD` (and do the same inside your sbatch script). |
 | `… is not importable by reference` at `setup` | The lab is defined in `__main__` or a local scope. Move it to an importable module. |
 | `Experiments N and M map to the same directory` | They differ only in `hash_exclude` fields, or the sweep repeats a point. Remove the duplicate or make the differing field part of the hash. |
-| `Unknown params keys […]` | A top-level key in `PARAMS` is not `seed`, `num_instances` or a section name. Check for a typo. |
+| `Unknown configs keys […]` | A top-level key in `PARAMS` is not `seed`, `num_instances` or a section name. Check for a typo. |
 | `zipped() axes must have equal lengths` | Paired axes need the same length; use `grid` (or `*`) for independent axes. |
-| `instance_id … is out of range` | The id is outside `0 … num_instances-1`. In a batched sbatch script, cap the last batch (see the template). |
+| `instance_id N is out of range for experiment E` | The id is outside `0 … num_instances-1`. In a batched sbatch script, cap the last batch (see the template). |
+| `KeyError: No experiment N; valid ids: 0..K` | The experiment id is not in the manifest. After changing `PARAMS`, run `mechane setup` again. |
+| `TypeError: … declares no sections` | The lab still uses the base classes. Subclass `Configs`, annotate `ExperimentConfig.configs` with it, annotate `Experiment.config` with your `ExperimentConfig` subclass, and set `experiment_class` on the lab. |
+| `TypeError: … must be annotated with a Config subclass` | A field of your `Configs` class has a type that is not a `Config` subclass. |
+| `ValueError: Config names […] are reserved` | A section is named `experiment_id`, `num_instances` or `seed`. Rename it. |
+| `NameError: name '…' is not defined` when the lab is first used | Your classes are defined inside a function and the file uses `from __future__ import annotations`. Define them at module level. |
+| A type checker reports `Object of type Config has no attribute …` | You used the `config.<section>` shortcut. Use the typed path `config.configs.<section>`. |
 | An instance keeps being skipped after a code fix | Finished instances are skipped by design. Use `--overwrite`, or version your config so the result gets a new directory. |
 | `Cannot serialize … to JSON` | A parameter or output is a type `to_jsonable` doesn't know. Convert it to a plain type before returning it. |
 
@@ -517,32 +617,43 @@ from mechane import (
 
 ```bash
 git clone https://github.com/benjaminlanthier/mechane && cd mechane
-pip install -e .
-pip install pytest
-pytest
+uv sync                              # creates .venv with the dev tools
+uv run pytest
+uv run pre-commit install            # lint, format and type-check on every commit
+uv run pre-commit run --all-files    # the same checks, on demand
 ```
+
+CI runs the lint and type checks, the tests on Linux and macOS, and builds the wheel and
+smoke-tests the `mechane` command in a clean environment.
 
 ```
 src/mechane/
-  config.py        Config: hashing, enum coercion, path parts
-  sweep.py         grid / zipped / product / chain
-  experiment.py    ExperimentConfig, Experiment: paths, seeds, results, aggregation
-  instance.py      Instance, InstanceOutput
-  laboratory.py    Laboratory, manifest, load_laboratory
-  registry.py      "module:Class" and entry-point resolution
-  runner.py        run one instance (skip, save, traceback)
-  provenance.py    allow-listed run metadata
-  serialization.py to_jsonable, stable_hash
-  io.py            atomic JSON writes
-  cli.py           click commands
+  __init__.py        the public API (re-exports)
+  core/
+    config.py        Config: hashing, enum coercion, path parts
+    experiment.py    Configs, ExperimentConfig, Experiment: paths, seeds, results, aggregation
+    instance.py      Instance, InstanceOutput
+    laboratory.py    Laboratory, manifest, load_laboratory
+    runner.py        run one instance (skip, save, traceback)
+  utils/
+    sweep.py         grid / zipped / product / chain
+    serialization.py to_jsonable, stable_hash
+    seeding.py       mix31, the bijection behind per-instance seeds
+    registry.py      "module:Class" and entry-point resolution
+    provenance.py    allow-listed run metadata
+    io.py            atomic JSON writes
+  cli/
+    __init__.py      the `mechane` command group
+    _options.py      click options shared by several commands
+    commands/        one module per command: setup, run, run_batch, aggregate, status
 tests/
-  toy.py           a minimal non-trivial lab, a template for new ones
+  toy.py             a minimal non-trivial lab, a template for new ones
   test_mechane.py
 ```
 
-The test suite covers hashing, sweep semantics, seed stability, collision detection, padding
-migration, and a full `setup → run → status → aggregate` workflow through the CLI, including
-failure isolation.
+The test suite covers hashing, sweep semantics, seed uniqueness and stability (with pinned values),
+collision detection, instance-id validation, padding migration, and a full
+`setup → run → status → aggregate` workflow through the CLI, including failure isolation.
 
 ## Citing and license
 
