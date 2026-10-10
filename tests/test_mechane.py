@@ -15,7 +15,7 @@ from mechane.cli import (
     simulate_batch,
     status,
 )
-from toy import Kind, Model, Solver, ToyLab
+from toy import Kind, Model, Solver, ToyExperiment, ToyLab
 
 
 # --------------------------------------------------------------------------- hashing
@@ -121,7 +121,7 @@ def test_derived_seed_is_stable_when_sweep_grows(tmp_path):
 
 
 def test_legacy_seed_matches_original_formula(tmp_path):
-    class LegacyExp(ToyLab.experiment_class):
+    class LegacyExp(ToyExperiment):
         seed_scheme = "legacy"
 
     lab = make_lab(tmp_path)

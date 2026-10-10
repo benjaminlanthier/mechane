@@ -4,7 +4,15 @@ lattice of size L. Used by the tests and as the template for new labs."""
 from dataclasses import dataclass
 from enum import StrEnum
 
-from mechane import Config, Instance, InstanceOutput, Laboratory
+from mechane import (
+    Config,
+    Configs,
+    Experiment,
+    ExperimentConfig,
+    Instance,
+    InstanceOutput,
+    Laboratory,
+)
 
 
 class Kind(StrEnum):
@@ -26,10 +34,27 @@ class Solver(Config):
     hash_exclude = ("device",)
 
 
+@dataclass(frozen=True)
+class ToyConfigs(Configs):
+    model: Model
+    solver: Solver
+
+
+@dataclass(frozen=True)
+class ToyExperimentConfig(ExperimentConfig):
+    configs: ToyConfigs
+
+
+class ToyExperiment(Experiment):
+    config: ToyExperimentConfig
+
+
 class ToyInstance(Instance):
+    experiment: ToyExperiment
+
     def run(self):
-        model = self.experiment.config.model
-        solver = self.experiment.config.solver
+        configs = self.experiment.config.configs  # typed path: ToyConfigs
+        model, solver = configs.model, configs.solver
         if solver.sigma < 0:
             raise ValueError("negative sigma")
         x = self.rng.normal(0.0, solver.sigma, size=(solver.n_samples, model.L))
@@ -41,5 +66,5 @@ class ToyInstance(Instance):
 
 class ToyLab(Laboratory):
     name = "toy"
-    configs_classes = {"model": Model, "solver": Solver}
+    experiment_class = ToyExperiment
     instance_class = ToyInstance

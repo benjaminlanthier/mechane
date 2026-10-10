@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from mechane.config import Config
-from mechane.experiment import Experiment, ExperimentConfig
+from mechane.experiment import Configs, Experiment, ExperimentConfig
 from mechane.instance import Instance
 from mechane.io import atomic_write_json
 from mechane.provenance import collect_provenance
@@ -24,14 +24,17 @@ class Laboratory:
 
         class MyLab(Laboratory):
             name = "my-lab"
-            configs_classes = {"model": Model, "solver": Solver}   # order = directory nesting
+            experiment_class = MyExperiment
             instance_class = MyInstance
+
+    The sections come from the type annotations you already write:
+    `MyExperiment.config: MyExperimentConfig`, `MyExperimentConfig.configs: MyConfigs`, and the
+    fields of `MyConfigs`. The field order of `MyConfigs` is the directory nesting order.
     """
 
     name: ClassVar[str]
-    configs_classes: ClassVar[dict[str, type[Config]]]
+    experiment_class: ClassVar[type[Experiment]]
     instance_class: ClassVar[type[Instance]]
-    experiment_class: ClassVar[type[Experiment]] = Experiment
     #: Order in which sections are multiplied to number the experiments. Defaults to the
     #: directory order. Set it explicitly to keep experiment ids stable when porting.
     sweep_order: ClassVar[tuple[str, ...] | None] = None
@@ -52,11 +55,32 @@ class Laboratory:
         self._manifest_path = manifest_path or self.default_manifest_path(self.root)
         self._by_id = {e.config.experiment_id: e for e in self.experiments}
 
+    # ---- class chain: Laboratory -> Experiment -> ExperimentConfig -> Configs -> Config --------
+    @classmethod
+    def experiment_config_class(cls) -> type[ExperimentConfig]:
+        return cls.experiment_class.config_class()
+
+    @classmethod
+    def configs_class(cls) -> type[Configs]:
+        return cls.experiment_config_class().configs_class()
+
+    @classmethod
+    def section_classes(cls) -> dict[str, type[Config]]:
+        sections = cls.configs_class().section_classes()
+        if not sections:
+            raise TypeError(
+                f"{cls.__name__}: {cls.configs_class().__name__} declares no sections. Subclass "
+                "Configs, annotate `ExperimentConfig.configs` with it, and annotate "
+                "`Experiment.config` with your ExperimentConfig subclass."
+            )
+        return sections
+
     # ---- construction ---------------------------------------------------------------------
     @classmethod
     def from_configs(cls, root: Path, configs: dict[str, Any]) -> Laboratory:
         """Build from a configs dict: {"seed": ..., "num_instances": ..., <section>: spec, ...}."""
-        allowed = {"seed", "num_instances", *cls.configs_classes}
+        sections = cls.section_classes()
+        allowed = {"seed", "num_instances", *sections}
         unknown = set(configs) - allowed
         if unknown:
             raise ValueError(
@@ -65,22 +89,23 @@ class Laboratory:
         seed = configs.get("seed", 0)
         num_instances = configs.get("num_instances", 1)
 
-        order = cls.sweep_order or tuple(cls.configs_classes)
-        if set(order) != set(cls.configs_classes):
-            raise ValueError("sweep_order must list exactly the keys of configs_classes")
+        order = cls.sweep_order or tuple(sections)
+        if set(order) != set(sections):
+            raise ValueError("sweep_order must list exactly the sections of the Configs class")
 
         axes = {
-            name: [cls.configs_classes[name].from_dict(p) for p in expand(configs.get(name, {}))]
+            name: [sections[name].from_dict(p) for p in expand(configs.get(name, {}))]
             for name in order
         }
+        config_cls, configs_cls = cls.experiment_config_class(), cls.configs_class()
         experiments = []
         for experiment_id, combo in enumerate(product(*(axes[n] for n in order))):
             chosen = dict(zip(order, combo, strict=True))
-            config = ExperimentConfig(
+            config = config_cls(
                 experiment_id=experiment_id,
                 num_instances=num_instances,
                 seed=seed,
-                configs={n: chosen[n] for n in cls.configs_classes},
+                configs=configs_cls(**{n: chosen[n] for n in sections}),
             )
             experiments.append(cls.experiment_class(root=Path(root), config=config))
         if not experiments:
@@ -96,10 +121,9 @@ class Laboratory:
     def from_manifest(cls, manifest_path: Path) -> Laboratory:
         manifest = read_manifest(manifest_path)
         root = Path(manifest["root"])
+        config_cls = cls.experiment_config_class()
         experiments = [
-            cls.experiment_class(
-                root=root, config=ExperimentConfig.from_dict(data, cls.configs_classes)
-            )
+            cls.experiment_class(root=root, config=config_cls.from_dict(data))
             for data in manifest["experiments"].values()
         ]
         return cls(

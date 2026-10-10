@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import importlib
 from importlib import metadata
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mechane.laboratory import Laboratory
@@ -24,7 +24,7 @@ def laboratory_ref(cls: type) -> str:
 def resolve_laboratory(ref: str) -> type[Laboratory]:
     if ":" in ref:
         module_name, _, attr = ref.partition(":")
-        obj = importlib.import_module(module_name)
+        obj: Any = importlib.import_module(module_name)
         for part in attr.split("."):
             obj = getattr(obj, part)
         return obj

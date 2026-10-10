@@ -2,31 +2,61 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, Self, get_type_hints
 
 from mechane.config import Config
 from mechane.serialization import stable_hash
 
+RESERVED = frozenset({"experiment_id", "num_instances", "seed"})
+
+
+@dataclass(frozen=True)
+class Configs:
+    """Base class for the user's collection of sections. Field order = nesting order."""
+
+    def __post_init__(self) -> None:
+        clash = RESERVED & set(self.names())
+        if clash:
+            raise ValueError(f"Config names {sorted(clash)} are reserved")
+
+    def names(self) -> tuple[str, ...]:
+        return tuple(f.name for f in fields(self))
+
+    def as_dict(self) -> dict[str, Config]:
+        return {name: getattr(self, name) for name in self.names()}
+
+    @classmethod
+    def section_classes(cls) -> dict[str, type[Config]]:
+        """Section name -> `Config` subclass, read from the field annotations (in field order)."""
+        hints = get_type_hints(cls)
+        out: dict[str, type[Config]] = {}
+        for f in fields(cls):
+            tp = hints[f.name]
+            if not (isinstance(tp, type) and issubclass(tp, Config)):
+                raise TypeError(
+                    f"{cls.__name__}.{f.name} must be annotated with a Config subclass, got {tp!r}"
+                )
+            out[f.name] = tp
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Self:
+        return cls(**{n: tp.from_dict(data[n]) for n, tp in cls.section_classes().items()})
+
 
 @dataclass(frozen=True)
 class ExperimentConfig:
-    """One point of the parameter space: an ordered collection of named `Config` configs.
-
-    The order of `configs` is the directory nesting order (see `Experiment.stage_dir`).
-    Configs are reachable as attributes: `config.code`, `config.noise`, ...
-    """
-
     experiment_id: int
     num_instances: int
     seed: int
-    configs: dict[str, Config]
+    configs: Configs
 
     def __getattr__(self, name: str) -> Config:
         configs = self.__dict__.get("configs")
-        if configs is not None and name in configs:
-            return configs[name]
+        if configs is not None and name in configs.names():
+            return getattr(configs, name)
         raise AttributeError(name)
 
     def to_dict(self) -> dict[str, Any]:
@@ -34,56 +64,55 @@ class ExperimentConfig:
             "experiment_id": self.experiment_id,
             "num_instances": self.num_instances,
             "seed": self.seed,
-            **{name: cfg.to_dict() for name, cfg in self.configs.items()},
+            **{name: cfg.to_dict() for name, cfg in self.configs.as_dict().items()},
         }
 
     def content_hash(self) -> str:
         """Hash of everything that influences results; independent of `experiment_id`,
         `num_instances` and every section's `hash_exclude` fields."""
-        return stable_hash({name: cfg.hash_payload() for name, cfg in self.configs.items()})
+        return stable_hash(
+            {name: cfg.hash_payload() for name, cfg in self.configs.as_dict().items()}
+        )
 
     @classmethod
-    def from_dict(
-        cls, data: dict[str, Any], configs_classes: dict[str, type[Config]]
-    ) -> ExperimentConfig:
+    def configs_class(cls) -> type[Configs]:
+        """The `Configs` subclass, read from this class's `configs` annotation."""
+        return get_type_hints(cls)["configs"]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         return cls(
             experiment_id=data["experiment_id"],
             num_instances=data["num_instances"],
             seed=data["seed"],
-            configs={name: sc.from_dict(data[name]) for name, sc in configs_classes.items()},
+            configs=cls.configs_class().from_dict(data),
         )
 
 
 class Experiment:
-    """A single point of the sweep plus the directory tree it owns.
-
-    Layout:  root / <section 1 path parts> / <section 2 path parts> / ... / instances / <id> /
-    Every prefix of that path is a *stage directory*: put an artifact there (a compiled
-    object, a partitioning, ...) and every experiment sharing that prefix shares the artifact.
-    """
-
-    #: "derived": seed = hash(base seed, content hash, instance id) - stable when the sweep changes.
-    #: "legacy":  seed = hash of the full config dict incl. experiment_id/num_instances, as in the
-    #:            original `experiments` package. Use it to keep reproducing existing result trees.
     seed_scheme: ClassVar[Literal["derived", "legacy"]] = "derived"
+    config: ExperimentConfig  # subclasses narrow this; `config_class()` reads it back
+
+    @classmethod
+    def config_class(cls) -> type[ExperimentConfig]:
+        return get_type_hints(cls)["config"]
 
     def __init__(self, root: Path, config: ExperimentConfig) -> None:
         self.root = Path(root)
         self.config = config
 
-    # ---- paths ----------------------------------------------------------------------------
     def stage_dir(self, section: str) -> Path:
         path = self.root
-        for name, cfg in self.config.configs.items():
+        for name, cfg in self.config.configs.as_dict().items():
             path = path.joinpath(*cfg.path_parts())
             if name == section:
                 return path
-        raise KeyError(f"No section {section!r}; configs are {list(self.config.configs)}")
+        raise KeyError(f"No section {section!r}; configs are {list(self.config.configs.names())}")
 
     @property
     def instances_dir(self) -> Path:
-        last = next(reversed(self.config.configs), None)
-        base = self.stage_dir(last) if last else self.root
+        names = self.config.configs.names()
+        base = self.stage_dir(names[-1]) if names else self.root
         return base / "instances"
 
     @property

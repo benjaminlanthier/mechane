@@ -11,7 +11,7 @@ from __future__ import annotations
 import dataclasses
 from enum import Enum
 from functools import cache
-from typing import Any, ClassVar, Self, get_args, get_type_hints
+from typing import TYPE_CHECKING, Any, ClassVar, Self, get_args, get_type_hints
 
 from mechane.serialization import stable_hash, to_jsonable
 
@@ -27,7 +27,7 @@ def _enum_type(tp: Any) -> type[Enum] | None:
 
 
 @cache
-def _enum_fields(cls: type) -> dict[str, type[Enum]]:
+def _enum_fields(cls: type[Config]) -> dict[str, type[Enum]]:
     try:
         hints = get_type_hints(cls)
     except Exception:  # unresolved forward refs: skip coercion rather than fail
@@ -46,6 +46,11 @@ class Config:
     #: Fields that do NOT change the numerical result (backend, dtype, caching flags, ...).
     #: They are left out of the hash, so they never change the directory or the seed.
     hash_exclude: ClassVar[tuple[str, ...]] = ()
+
+    if TYPE_CHECKING:
+        # Subclasses are frozen dataclasses; declaring this makes `Config` satisfy the
+        # `DataclassInstance` protocol so `dataclasses.fields(cls)` type-checks.
+        __dataclass_fields__: ClassVar[dict[str, dataclasses.Field[Any]]]
 
     def __post_init__(self) -> None:
         for name, enum_cls in _enum_fields(type(self)).items():
