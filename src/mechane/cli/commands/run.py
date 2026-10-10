@@ -5,8 +5,8 @@ from pathlib import Path
 import click
 
 from mechane.cli._options import EXPERIMENT_ID, INSTANCE_ID, MANIFEST_PATH, OVERWRITE
+from mechane.cli.runner import run_instance
 from mechane.core.laboratory import load_laboratory
-from mechane.core.runner import run_instance
 
 
 @click.command("run")
