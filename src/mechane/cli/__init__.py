@@ -27,7 +27,6 @@ for _cmd in (setup_lab, simulate, simulate_batch, aggregate_results, status):
 
 __all__ = [
     "aggregate_results",
-    "load_params_file",
     "main",
     "setup_lab",
     "simulate",
