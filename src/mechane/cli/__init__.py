@@ -10,9 +10,20 @@ import click
 
 from mechane.cli.commands import (
     aggregate_results,
+    clean,
+    doctor,
+    errors,
+    export,
+    init,
+    list_experiments,
+    plan,
+    replay,
+    run_plan,
     setup_lab,
+    shell,
     simulate,
     simulate_batch,
+    stats,
     status,
 )
 
@@ -22,14 +33,42 @@ def main() -> None:
     """mechane: declarative sweeps and job running."""
 
 
-for _cmd in (setup_lab, simulate, simulate_batch, aggregate_results, status):
+for _cmd in (
+    aggregate_results,
+    clean,
+    doctor,
+    errors,
+    export,
+    init,
+    list_experiments,
+    plan,
+    replay,
+    run_plan,
+    setup_lab,
+    shell,
+    simulate,
+    simulate_batch,
+    stats,
+    status,
+):
     main.add_command(_cmd)
 
 __all__ = [
     "aggregate_results",
+    "clean",
+    "doctor",
+    "errors",
+    "export",
+    "init",
+    "list_experiments",
     "main",
+    "plan",
+    "replay",
+    "run_plan",
     "setup_lab",
+    "shell",
     "simulate",
     "simulate_batch",
+    "stats",
     "status",
 ]

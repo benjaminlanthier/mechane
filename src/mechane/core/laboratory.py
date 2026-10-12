@@ -7,12 +7,13 @@ from itertools import product
 from pathlib import Path
 from typing import Any, ClassVar
 
-from mechane.core.config import Config
-from mechane.core.experiment import Configs, Experiment, ExperimentConfig
+from mechane.core.config import Config, Configs, ExperimentConfig
+from mechane.core.experiment import Experiment
 from mechane.core.instance import Instance
+from mechane.core.manifest import read_manifest
+from mechane.core.registry import laboratory_ref, resolve_laboratory
 from mechane.utils.io import atomic_write_json
 from mechane.utils.provenance import collect_provenance
-from mechane.utils.registry import laboratory_ref, resolve_laboratory
 from mechane.utils.sweep import expand
 
 
@@ -203,7 +204,7 @@ class Laboratory:
         }
 
     def setup(self) -> None:
-        """Write the manifest and create every instances directory up front, so array tasks
+        """Write the manifest and create every instances directory up front, so parallel tasks
         never race on `mkdir`."""
         ref = laboratory_ref(type(self))
         try:
@@ -230,18 +231,3 @@ class Laboratory:
         for exp in self.experiments:
             all_results[str(exp.config.experiment_id)] = exp.aggregate_instance_results()
         atomic_write_json(self.all_results_path, all_results)
-
-
-def read_manifest(manifest_path: Path) -> dict[str, Any]:
-    manifest_path = Path(manifest_path)
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"No manifest at {manifest_path}")
-    with manifest_path.open() as f:
-        return json.load(f)
-
-
-def load_laboratory(manifest_path: Path) -> Laboratory:
-    """Rebuild the right Laboratory subclass from a manifest alone."""
-    manifest = read_manifest(manifest_path)
-    ref = manifest.get("laboratory") or manifest["experiment_type"]  # older manifests: type name
-    return resolve_laboratory(ref).from_manifest(manifest_path)

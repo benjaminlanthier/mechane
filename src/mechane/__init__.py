@@ -1,9 +1,10 @@
 """mechane: organise numerical experiments as Laboratory -> Experiment -> Instance."""
 
-from mechane.core.config import Config
-from mechane.core.experiment import Configs, Experiment, ExperimentConfig
+from mechane.core.config import Config, Configs, ExperimentConfig
+from mechane.core.experiment import Experiment
 from mechane.core.instance import Instance, InstanceOutput
-from mechane.core.laboratory import Laboratory, load_laboratory
+from mechane.core.laboratory import Laboratory
+from mechane.core.manifest import load_laboratory
 from mechane.utils.serialization import stable_hash, to_jsonable
 from mechane.utils.sweep import Sweep, expand, grid, zipped
 

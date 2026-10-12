@@ -1,94 +1,16 @@
+"""`Experiment`: one point of the sweep. It owns the directory tree its instances live in, their
+seeds, and reading their results back. It does not run anything: see `mechane.core.runner`."""
+
 from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from dataclasses import dataclass, fields
 from functools import cached_property
 from pathlib import Path
-from typing import Any, ClassVar, Literal, Self, get_type_hints
+from typing import Any, ClassVar, Literal, get_type_hints
 
-from mechane.core.config import Config
-from mechane.utils.seeding import SEED_BITS, SEED_MASK, mix31
-from mechane.utils.serialization import stable_hash
-
-RESERVED = frozenset({"experiment_id", "num_instances", "seed", "configs"})
-
-
-@dataclass(frozen=True)
-class Configs:
-    """Base class for the user's collection of sections. Field order = nesting order."""
-
-    def __post_init__(self) -> None:
-        clash = RESERVED & set(self.names())
-        if clash:
-            raise ValueError(f"Config names {sorted(clash)} are reserved")
-
-    def names(self) -> tuple[str, ...]:
-        return tuple(f.name for f in fields(self))
-
-    def as_dict(self) -> dict[str, Config]:
-        return {name: getattr(self, name) for name in self.names()}
-
-    @classmethod
-    def section_classes(cls) -> dict[str, type[Config]]:
-        """Section name -> `Config` subclass, read from the field annotations (in field order)."""
-        hints = get_type_hints(cls)
-        out: dict[str, type[Config]] = {}
-        for f in fields(cls):
-            tp = hints[f.name]
-            if not (isinstance(tp, type) and issubclass(tp, Config)):
-                raise TypeError(
-                    f"{cls.__name__}.{f.name} must be annotated with a Config subclass, got {tp!r}"
-                )
-            out[f.name] = tp
-        return out
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Self:
-        return cls(**{n: tp.from_dict(data[n]) for n, tp in cls.section_classes().items()})
-
-
-@dataclass(frozen=True)
-class ExperimentConfig:
-    experiment_id: int
-    num_instances: int
-    seed: int
-    configs: Configs
-
-    def __getattr__(self, name: str) -> Config:
-        configs = self.__dict__.get("configs")
-        if configs is not None and name in configs.names():
-            return getattr(configs, name)
-        raise AttributeError(name)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "experiment_id": self.experiment_id,
-            "num_instances": self.num_instances,
-            "seed": self.seed,
-            **{name: cfg.to_dict() for name, cfg in self.configs.as_dict().items()},
-        }
-
-    def content_hash(self) -> str:
-        """Hash of everything that influences results; independent of `experiment_id`,
-        `num_instances` and every section's `hash_exclude` fields."""
-        return stable_hash(
-            {name: cfg.hash_payload() for name, cfg in self.configs.as_dict().items()}
-        )
-
-    @classmethod
-    def configs_class(cls) -> type[Configs]:
-        """The `Configs` subclass, read from this class's `configs` annotation."""
-        return get_type_hints(cls)["configs"]
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Self:
-        return cls(
-            experiment_id=data["experiment_id"],
-            num_instances=data["num_instances"],
-            seed=data["seed"],
-            configs=cls.configs_class().from_dict(data),
-        )
+from mechane.core.config import ExperimentConfig
+from mechane.utils.seeding import derived_base, derived_seed, legacy_seed
 
 
 class Experiment:
@@ -127,27 +49,17 @@ class Experiment:
     # ---- seeding --------------------------------------------------------------------------
     @cached_property
     def _seed_base(self) -> int:
-        """Starting point of this experiment's seed sequence. Depends on the experiment's
-        content and the user seed only, so it survives sweep growth and `num_instances` changes."""
-        payload = stable_hash({"seed": self.config.seed, "experiment": self.config.content_hash()})
-        return int(payload[:8], 16) & SEED_MASK
+        return derived_base(self.config.seed, self.config.content_hash())
 
     def instance_seed(self, instance_id: int) -> int:
         """Reproducible seed in [0, 2**31) (some C++ libs bind to a signed `int`).
 
-        "derived": `mix31(base + instance_id)`. Because `mix31` is a bijection, two instances of
-        the same experiment can never share a seed (for `instance_id < 2**31`). Seeds of
-        different experiments are independent in practice, but cannot be guaranteed distinct:
-        31 bits are too few, and a seed must not depend on which other experiments are swept.
-
-        "legacy": the original formula, kept bit-for-bit so old result trees stay reproducible.
+        `seed_scheme = "derived"` (default) or `"legacy"`; see `mechane.utils.seeding` for what
+        each guarantees.
         """
         if self.seed_scheme == "legacy":
-            payload = stable_hash({"instance_id": instance_id, **self.config.to_dict()})
-            return int(payload[:8], 16) & SEED_MASK
-        if not 0 <= instance_id < 1 << SEED_BITS:
-            raise ValueError(f"instance_id must be in [0, 2**{SEED_BITS}), got {instance_id}")
-        return mix31(self._seed_base + instance_id)
+            return legacy_seed(self.config.to_dict(), instance_id)
+        return derived_seed(self._seed_base, instance_id)
 
     # ---- results & aggregation -------------------------------------------------------------
     def results_path(self, instance_id: int) -> Path:

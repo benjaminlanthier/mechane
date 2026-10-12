@@ -38,7 +38,8 @@ def _git_info(directory: str) -> dict[str, Any] | None:
     try:
         return {
             "commit": git("rev-parse", "HEAD"),
-            "dirty": bool(git("status", "--porcelain")),
+            # Untracked files (logs, results, __pycache__) say nothing about the code that ran.
+            "dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
         }
     except Exception:
         return None
