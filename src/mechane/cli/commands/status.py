@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 
 from mechane.cli._options import MANIFEST_PATH
-from mechane.core.laboratory import load_laboratory
+from mechane.core.manifest import load_laboratory
 
 
 @click.command("status")

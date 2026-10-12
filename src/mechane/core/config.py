@@ -1,9 +1,13 @@
-"""`Config`: the building block of an experiment's parameter space.
+"""The configuration data model: what one experiment is *parameterised by*.
 
-A *section* is a frozen dataclass inheriting from `Config`. Each section knows
-  * how to serialize itself (`to_dict`),
-  * which of its fields influence results (`hash_exclude` lists the ones that don't),
-  * which directory components it contributes (`path_parts`, by default its hash).
+  * `Config`: one *section* of parameters, a frozen dataclass. A section knows
+      - how to serialize itself (`to_dict`),
+      - which of its fields influence results (`hash_exclude` lists the ones that don't),
+      - which directory components it contributes (`path_parts`, by default its hash).
+  * `Configs`: the ordered collection of sections. Its field order is the directory nesting order.
+  * `ExperimentConfig`: the `Configs` of one experiment plus its id, seed and instance count.
+
+This module knows nothing about directories, jobs or results.
 """
 
 from __future__ import annotations
@@ -74,3 +78,83 @@ class Config:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Self:
         return cls(**data)  # type: ignore[call-arg]
+
+
+RESERVED = frozenset({"experiment_id", "num_instances", "seed", "configs"})
+
+
+@dataclasses.dataclass(frozen=True)
+class Configs:
+    """Base class for the user's collection of sections. Field order = nesting order."""
+
+    def __post_init__(self) -> None:
+        clash = RESERVED & set(self.names())
+        if clash:
+            raise ValueError(f"Config names {sorted(clash)} are reserved")
+
+    def names(self) -> tuple[str, ...]:
+        return tuple(f.name for f in dataclasses.fields(self))
+
+    def as_dict(self) -> dict[str, Config]:
+        return {name: getattr(self, name) for name in self.names()}
+
+    @classmethod
+    def section_classes(cls) -> dict[str, type[Config]]:
+        """Section name -> `Config` subclass, read from the field annotations (in field order)."""
+        hints = get_type_hints(cls)
+        out: dict[str, type[Config]] = {}
+        for f in dataclasses.fields(cls):
+            tp = hints[f.name]
+            if not (isinstance(tp, type) and issubclass(tp, Config)):
+                raise TypeError(
+                    f"{cls.__name__}.{f.name} must be annotated with a Config subclass, got {tp!r}"
+                )
+            out[f.name] = tp
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Self:
+        return cls(**{n: tp.from_dict(data[n]) for n, tp in cls.section_classes().items()})
+
+
+@dataclasses.dataclass(frozen=True)
+class ExperimentConfig:
+    experiment_id: int
+    num_instances: int
+    seed: int
+    configs: Configs
+
+    def __getattr__(self, name: str) -> Config:
+        configs = self.__dict__.get("configs")
+        if configs is not None and name in configs.names():
+            return getattr(configs, name)
+        raise AttributeError(name)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "experiment_id": self.experiment_id,
+            "num_instances": self.num_instances,
+            "seed": self.seed,
+            **{name: cfg.to_dict() for name, cfg in self.configs.as_dict().items()},
+        }
+
+    def content_hash(self) -> str:
+        """Hash of everything that influences results; independent of `experiment_id`,
+        `num_instances` and every section's `hash_exclude` fields."""
+        return stable_hash(
+            {name: cfg.hash_payload() for name, cfg in self.configs.as_dict().items()}
+        )
+
+    @classmethod
+    def configs_class(cls) -> type[Configs]:
+        """The `Configs` subclass, read from this class's `configs` annotation."""
+        return get_type_hints(cls)["configs"]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Self:
+        return cls(
+            experiment_id=data["experiment_id"],
+            num_instances=data["num_instances"],
+            seed=data["seed"],
+            configs=cls.configs_class().from_dict(data),
+        )

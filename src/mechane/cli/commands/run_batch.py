@@ -6,8 +6,9 @@ from pathlib import Path
 import click
 
 from mechane.cli._options import EXPERIMENT_ID, INSTANCE_IDS, MANIFEST_PATH, OVERWRITE
-from mechane.cli.runner import run_instance
-from mechane.core.laboratory import load_laboratory
+from mechane.cli._output import echo_event
+from mechane.core.manifest import load_laboratory
+from mechane.core.runner import run_batch
 
 
 @click.command("run-batch")
@@ -28,16 +29,17 @@ def simulate_batch(
     if not ids or any(i < 0 for i in ids):
         raise click.UsageError("--instance-ids must be a non-empty list of non-negative integers.")
     lab = load_laboratory(manifest_path)  # loaded once for the whole batch
-    failed: list[int] = []
-    for instance_id in ids:
-        try:
-            run_instance(lab, experiment_id, instance_id, overwrite=overwrite)
-        except Exception as exc:
-            failed.append(instance_id)
-            click.echo(f"[BatchJob] instance_id={instance_id} FAILED: {exc!r}", err=True)
-            if not continue_on_error:
-                raise
-    if failed:
-        click.echo(f"[BatchJob] {len(failed)}/{len(ids)} failed: {failed}", err=True)
+    result = run_batch(
+        lab,
+        experiment_id,
+        ids,
+        overwrite=overwrite,
+        continue_on_error=continue_on_error,
+        listener=echo_event,
+    )
+    if result.failed:
+        click.echo(
+            f"[BatchJob] {len(result.failed)}/{len(ids)} failed: {list(result.failed)}", err=True
+        )
         sys.exit(1)
     click.echo(f"[BatchJob] Completed {len(ids)}/{len(ids)} instance(s).")
