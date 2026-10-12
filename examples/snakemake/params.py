@@ -3,7 +3,7 @@ from pathlib import Path
 from mechane import grid
 
 # Absolute, so that every mechane command finds the results wherever it is run from.
-ROOT = Path("results/decay").resolve()
+ROOT = Path("outputs/decay").resolve()
 
 LABORATORY = "decay:DecayLab"
 

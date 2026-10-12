@@ -2,7 +2,10 @@
 # results go. Run it with:   snakemake -c4
 import json
 
-MANIFEST = "results/decay/manifest.json"  # ROOT in params.py, plus manifest.json
+OUTPUT_PATH = "outputs"
+LAB_NAME = "decay"
+MANIFEST_PATH = f"{OUTPUT_PATH}/{LAB_NAME}"
+MANIFEST = f"{MANIFEST_PATH}/manifest.json"  # ROOT in params.py, plus manifest.json
 PLAN = "plan.json"
 BATCH_SIZE = 5  # instances per Snakemake job: one job per mechane task, not one per instance
 
@@ -11,7 +14,7 @@ shell.prefix('export PYTHONPATH="$PWD:$PYTHONPATH"; ')  # so that `mechane` can 
 
 rule all:
     input:
-        "results/summary.txt",
+        f"{OUTPUT_PATH}/summary.txt",
 
 
 rule setup:  # stage 1: expand the sweep and write the manifest
@@ -62,16 +65,16 @@ rule export:  # stage 5: results as a table, one row per instance
     input:
         "done/complete",
     output:
-        "results/table.csv",
+        f"{OUTPUT_PATH}/table.csv",
     shell:
         "mechane export --manifest-path {MANIFEST} --output {output}"
 
 
 rule summarize:  # stage 6: your analysis
     input:
-        "results/table.csv",
+        f"{OUTPUT_PATH}/table.csv",
         "summarize.py",
     output:
-        "results/summary.txt",
+        f"{OUTPUT_PATH}/summary.txt",
     shell:
         "python summarize.py {input[0]} > {output}"
