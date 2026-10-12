@@ -35,11 +35,15 @@ jobs:
   test:
     name: Tests (py${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Windows runs, and its result is shown, but it does not fail CI (and so does not block the
+    # release workflow, which only runs after a green CI) until its known failures are fixed.
+    # Delete this line to make Windows required.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ["3.13"]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -50,8 +54,11 @@ jobs:
       - run: uv sync
       - run: uv run pytest -q
 
+  # mechane is pure Python, so it has exactly ONE wheel (py3-none-any) that serves every OS and
+  # Python version. It is built once, here, and kept as the `dist` artifact of this run: download
+  # it from the run's page, whether the run came from a push, a pull request or "Run workflow".
   build:
-    name: Build and smoke-test the wheel
+    name: Build the wheel and sdist
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -59,5 +66,60 @@ jobs:
         with:
           python-version: "3.13"
       - run: uv build
-      - name: Install the built wheel in a clean environment and run the CLI
-        run: uvx --from dist/*.whl mechane --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+
+  # The test job above checks the source tree. This one installs the built wheel itself, and
+  # nothing else of this repository, on every OS and Python version, and runs mechane end to end.
+  wheel:
+    name: Wheel (py${{ matrix.python-version }}, ${{ matrix.os }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    # Same rule as for the tests: Windows runs without blocking releases until it is known green.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the built wheel in a clean environment and run it end to end
+        shell: bash
+        run: |
+          uv run --no-project --python "${{ matrix.python-version }}" --with dist/*.whl python - <<'PY'
+          import os
+          import subprocess
+          import sys
+          import tempfile
+          from pathlib import Path
+
+          with tempfile.TemporaryDirectory() as tmp:
+              env = {**os.environ, "PYTHONPATH": tmp}
+
+              def mechane(*args):
+                  print("$ mechane", *args, flush=True)
+                  subprocess.run([sys.executable, "-m", "mechane.cli", *args], cwd=tmp, env=env, check=True)
+
+              manifest = str(Path(tmp, "results", "smoke", "manifest.json"))
+              mechane("--help")
+              mechane("init", "lab", "smoke")
+              mechane("setup", "--params-file", "params.py")
+              for experiment_id in (0, 1):
+                  ids = ",".join(str(i) for i in range(10))
+                  mechane("run-batch", "--manifest-path", manifest, "--experiment-id", str(experiment_id), "--instance-ids", ids)
+              mechane("status", "--manifest-path", manifest, "--check")
+              mechane("doctor", "--manifest-path", manifest)
+              mechane("replay", "--manifest-path", manifest, "--experiment-id", "0", "--instance-id", "3")
+              mechane("export", "--manifest-path", manifest, "--output", str(Path(tmp, "table.csv")))
+              print("smoke test passed:", sys.version.split()[0], sys.platform)
+          PY
