@@ -5,7 +5,6 @@ import code
 import csv
 import io
 import json
-import pdb
 import re
 
 import pytest
@@ -484,7 +483,7 @@ def test_replay_can_keep_its_scratch_directory(lab, tmp_path):
 
 def test_replay_opens_the_debugger_only_when_asked(failing_lab, monkeypatch):
     opened = []
-    monkeypatch.setattr(pdb, "post_mortem", lambda tb: opened.append(tb))
+    monkeypatch.setattr("pdb.post_mortem", lambda tb: opened.append(tb))
     args = with_manifest(failing_lab, "--experiment-id", 0, "--instance-id", 0)
 
     plain = invoke(replay, *args)
