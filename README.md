@@ -4,8 +4,10 @@
 
 `mechane` organizes numerical experiments: you describe a parameter sweep declaratively, and it
 expands it into experiments, gives every result a content-addressed home on disk, seeds every
-repetition reproducibly, and runs the work locally or as SLURM arrays through one small CLI. The
-same CLI plans array jobs, and lets you inspect, verify and clean up a sweep afterwards.
+repetition reproducibly, and runs the work locally or under any scheduler or workflow tool
+through one small CLI. The same CLI splits the work into tasks, and lets you inspect, verify and
+clean up a sweep afterwards. A project that uses it together with Snakemake is included as an
+example.
 
 It is domain-agnostic. It knows nothing about physics, machine learning or any particular solver:
 you bring the parameters and a `run()` method.
@@ -29,7 +31,7 @@ Known rough edges are listed under [Design notes and limitations](#design-notes-
 - [Result files and provenance](#result-files-and-provenance)
 - [Aggregation](#aggregation)
 - [Command-line reference](#command-line-reference)
-- [Running on SLURM](#running-on-slurm)
+- [Using mechane with Snakemake](#using-mechane-with-snakemake)
 - [Inspecting and maintaining a sweep](#inspecting-and-maintaining-a-sweep)
 - [Registering your laboratory](#registering-your-laboratory)
 - [Python API at a glance](#python-api-at-a-glance)
@@ -83,8 +85,8 @@ Instance   ── run() ──▶ results.json
 
 Two small JSON files tie the steps together. The **manifest** (`manifest.json`) is written once by
 `mechane setup`: it is the expanded sweep, and every later command rebuilds its laboratory from
-it. A **plan** is written by `mechane plan` for SLURM: it says which instances each array task
-runs.
+it. A **plan** is written by `mechane plan`: it says which instances each task runs, for a
+scheduler or a workflow tool to run one task at a time.
 
 ## Install
 
@@ -482,19 +484,18 @@ layout of the aggregate itself, override `aggregate_instance_results()`.
 | `run` | Run one instance | `--manifest-path`, `--experiment-id`, `--instance-id`, `--overwrite/--no-overwrite` |
 | `run-batch` | Run several instances of one experiment in one process | `--manifest-path`, `--experiment-id`, `--instance-ids 0,1,2`, `--overwrite/--no-overwrite`, `--continue-on-error/--fail-fast` |
 | `aggregate` | Collect results into `aggregated_results.json` | `--manifest-path` |
-| `status` | Done / failed / missing counts per experiment | `--manifest-path` |
-| `plan` | Split the work into SLURM array tasks | `--manifest-path`, `--batch-size`, `--unfinished`, `--output PLAN`, `--format table\|array\|json`, selection |
-| `run-plan` | Run one task of a saved plan (one array task) | `--plan-file`, `--task-id`, `--overwrite/--no-overwrite`, `--continue-on-error/--fail-fast` |
+| `status` | Done / failed / missing counts per experiment; `--check` exits 1 unless everything is done | `--manifest-path`, `--check` |
+| `plan` | Split the work into tasks of a few instances each | `--manifest-path`, `--batch-size`, `--unfinished`, `--output PLAN`, `--format table\|json`, selection |
+| `run-plan` | Run one task of a saved plan | `--plan-file`, `--task-id`, `--overwrite/--no-overwrite`, `--continue-on-error/--fail-fast` |
 | `list` | Experiments with their parameters | `--manifest-path`, selection, `--status`, `--paths`, `--all`, `--json` |
 | `errors` | Failed instances grouped by their error | `--manifest-path`, selection, `--examples`, `--traceback` |
 | `doctor` | Consistency checks on the results on disk | `--manifest-path`, selection, `--strict` |
-| `stats` | Wall-time statistics, optionally disk usage and a suggested `--time` | `--manifest-path`, selection, `--disk`, `--batch-size`, `--margin` |
+| `stats` | Wall-time statistics, optionally disk usage and a suggested time limit | `--manifest-path`, selection, `--disk`, `--batch-size`, `--margin` |
 | `replay` | Re-run one instance and compare with its stored result | `--manifest-path`, `--experiment-id`, `--instance-id`, `--rtol`, `--scratch-dir`, `--pdb` |
 | `shell` | A Python prompt with the laboratory loaded as `lab` | `--manifest-path` |
 | `export` | Finished instances as CSV or JSON lines | `--manifest-path`, selection, `--format csv\|jsonl`, `--output`, `--inputs`, `--meta` |
 | `clean` | Remove `job.err` files, results or stray directories | `--manifest-path`, selection, `--what errors\|results\|stray`, `--instance-ids`, `--all-experiments`, `--yes` |
 | `init lab NAME` | Write a runnable laboratory module and `params.py` | `--section` (repeatable), `--directory`, `--force` |
-| `init slurm` | Print (or write, with `--output`) an sbatch script that runs the tasks of a plan | `--job-name`, `--time`, `--cpus-per-task`, `--mem`, `--account`, `--partition`, `--container`, `--bind`, `--module`, `--output`, `--force` |
 
 **Selection** (`plan`, `list`, `errors`, `doctor`, `stats`, `export`, `clean`) narrows a command to
 some experiments: `--experiment-id N` (repeatable) and `--where KEY=VALUE` (repeatable, ANDed),
@@ -506,13 +507,15 @@ where KEY is a dotted parameter as in the manifest (`walk.dim`, `solver.sigma`, 
 
 - `0`: success.
 - `1`: `run-batch` or `run-plan` when any instance failed (once the batch has finished; with
-  `--fail-fast`, the first exception is re-raised); `doctor` when it finds errors (warnings too
-  with `--strict`); `replay` when the replay differs from the stored result; and an exception
-  raised by an instance in `run` or `replay`.
+  `--fail-fast`, the first exception is re-raised); `status --check` when any instance is not
+  done; `doctor` when it finds errors (warnings too with `--strict`); `replay` when the replay
+  differs from the stored result; and an exception raised by an instance in `run` or `replay`.
 - `2`: usage errors (a bad option, an unknown `--where` key, a task id outside the plan, a params
   file that names no laboratory).
-- `status`, `aggregate`, `list`, `errors`, `stats` and `export` exit `0` whenever they run, even if
-  work is missing or failed. Use `doctor`, or `plan --unfinished`, to turn that into a check.
+- `status` without `--check`, `aggregate`, `list`, `errors`, `stats` and `export` exit `0` whenever
+  they run, even if work is missing or failed. Use `status --check` (is everything done?) and
+  `doctor` (is what is there consistent?) to turn that into a check, for instance as a gate in a
+  workflow.
 
 Behaviour worth knowing:
 
@@ -524,7 +527,7 @@ Behaviour worth knowing:
 - **`run` and `run-batch` do not check that an instance id is below `num_instances`.** An id past
   the end runs and writes a result that `status`, `aggregate` and `export` never look at.
   `plan` and `run-plan` only use valid ids, and `replay` rejects invalid ones. A hand-written
-  batching script must cap its last batch (see [Running on SLURM](#running-on-slurm)); `doctor`
+  batching script must cap its last batch (see [Other schedulers and plain scripts](#other-schedulers-and-plain-scripts)); `doctor`
   reports the leftovers of one that did not, and `clean --what stray` removes them.
 - An unknown experiment id fails with the list of valid ids: as a `KeyError` in `run` and
   `run-batch`, as a usage error in `replay` and in the commands that take a selection.
@@ -563,31 +566,84 @@ the current directory of every later command, so `status` run from another direc
 and `aggregate` reports no finished instances. Write `Path("results").resolve()`, as in the
 Quickstart; `doctor` warns about a relative root.
 
-## Running on SLURM
+## Using mechane with Snakemake
 
-`mechane` does not submit jobs for you. It gives your batch script a stable address for every
-unit of work, and prints what to submit.
+`mechane` does not submit jobs and knows nothing about schedulers. It gives schedulers and
+workflow tools stable commands to call: `plan` and `run-plan` split the work into tasks and run one
+task at a time, `status --check` and `doctor` say whether the results are complete and consistent,
+and every command reports success or failure through its exit status. Snakemake is a good partner
+when your project is a *pipeline* (simulate, check, export, analyse, plot): it orders the stages,
+runs independent jobs in parallel and, through its profiles, talks to a cluster scheduler. The
+settings that depend on the machine (account, partition, memory, run time, containers) then live
+in your project's Snakemake profile, not in mechane.
 
-### Planning array jobs
+| mechane | Snakemake |
+|---|---|
+| What the experiments are, where each result goes, which seed each instance uses | The order of the stages and which jobs can run in parallel |
+| Which instances are done: finished ones are skipped, failures leave a traceback | Resources, retries, and submitting jobs to a cluster |
+| `status --check`, `doctor`, `errors`, `replay`: is it complete, consistent, reproducible? | Re-running only what is out of date |
 
-`mechane plan` splits the work into array tasks, and `mechane run-plan` runs one task of its
-result, so the script needs no `jq`, no division and no clamping of the last batch:
+A complete, runnable project is in [`examples/snakemake/`](examples/snakemake/): a small Monte
+Carlo lab, its sweep, a Snakefile and an analysis script. Abridged, its core is four rules:
 
-```bash
-mechane init slurm --account def-me --time 02:00:00 --output job.sh   # once; edit as needed
-mkdir -p logs
-mechane setup --params-file params.py
-ARRAY=$(mechane plan --manifest-path results/walks/manifest.json --batch-size 10 \
-        --output plan.json --format array)
-sbatch --array="$ARRAY" job.sh plan.json
+```python
+rule setup:                       # expand the sweep, write the manifest
+    input: "params.py", "decay.py"
+    output: MANIFEST
+    shell: "mechane setup --params-file {input[0]}"
+
+checkpoint make_plan:             # split the work into tasks
+    input: MANIFEST
+    output: PLAN
+    shell: "mechane plan --manifest-path {input} --batch-size {BATCH_SIZE} --output {output} > /dev/null"
+
+rule run_task:                    # one Snakemake job per mechane task
+    input: PLAN
+    output: touch("done/task_{t}")
+    shell: "mechane run-plan --plan-file {input} --task-id {wildcards.t}"
+
+rule complete:                    # a gate: fails unless every instance is done
+    input: all_tasks
+    output: touch("done/complete")
+    shell: "mechane status --manifest-path {MANIFEST} --check"
 ```
 
-Each array task then runs `mechane run-plan --plan-file plan.json --task-id $SLURM_ARRAY_TASK_ID`.
-The plan file is the contract between submission and run time, so task `N` always means the same
-instances, even while other tasks finish. Printed without `--format array`, a plan is a table:
+The example then exports the results as a table (`mechane export`) and runs the analysis on it.
+Things to know:
+
+- **Give Snakemake tasks, not instances.** One Snakemake job should run a mechane *task* of
+  several instances. On one machine, 12 instances run as 12 separate `mechane run` processes took
+  1.95 s, against 0.18 s in a single `run-batch`: about 160 ms of Python start-up per process,
+  which matters when instances are short. Snakemake built a 5,000-job DAG in about 4 s in a dry
+  run, so the number of jobs is not what hurts: the cost per job is.
+- **mechane is the source of truth for "done".** Snakemake's `done/task_N` files only mean "this
+  task ran without failures". If you delete results or run `mechane clean` behind Snakemake's
+  back, it does not notice, and `snakemake` says "Nothing to be done". Tell it with
+  `snakemake --forcerun run_task`: that is cheap, because mechane skips finished instances. The
+  `complete` gate then confirms that everything really is done.
+- **Failures stop the pipeline.** `run-plan` exits 1 when any instance of its task failed, so the
+  job fails and nothing downstream runs. Look with `mechane errors` and `mechane doctor`, fix the
+  code, and run `snakemake` again: the failed tasks run again.
+- **Changing the sweep.** Editing `params.py` re-runs `setup` and `make_plan`. Experiment ids are
+  positional, so adding a point in the middle renumbers them (see
+  [limitations](#design-notes-and-limitations)): let Snakemake regenerate the plan, and do not
+  reuse a plan file that was saved by hand.
+- **Choosing the batch size and the time limit.** `mechane stats --batch-size N` suggests a time
+  limit for tasks of N instances, as a number of minutes (the unit of Snakemake's standard
+  `runtime` resource).
+- **Clusters.** The example was run with Snakemake's local executor. Running it on a cluster is
+  done with Snakemake's executor plugins and a profile for your cluster, which this repository
+  does not provide and has not tested.
+
+### Other schedulers and plain scripts
+
+Without a workflow tool, `mechane plan --output plan.json` writes the tasks. Task ids run from 0
+to the number of tasks minus one (the first line of the table gives the count), so a shell loop or
+any scheduler's array facility can run them:
 
 ```
-120 instance(s) in 12 task(s) of up to 10: sbatch --array=0-11
+$ mechane plan --manifest-path results/walks/manifest.json --batch-size 10 --output plan.json
+120 instance(s) in 12 task(s) of up to 10; run task N (0 to 11) with `mechane run-plan`
 
 task  experiment  count  instances
 0     0           10     0-9
@@ -596,104 +652,31 @@ task  experiment  count  instances
 ...
 ```
 
-- **Resubmitting.** `mechane plan --unfinished` plans only the instances that are missing or
-  failed, so a new plan covers exactly what is left. `--experiment-id` and `--where` plan some
-  experiments only.
-- **Choosing `--time` and the batch size.** Once some instances have finished,
-  `mechane stats --batch-size 10` suggests a time limit from their measured wall times.
-- **A plan belongs to its manifest.** It records experiment ids, and `run-plan` does not check
-  that the manifest still numbers its experiments the same way. After editing `PARAMS` and
-  re-running `setup`, make a new plan.
-
-`mechane init slurm` prints the sbatch script, or writes it with `--output`; it never submits it. With a container, bind mounts
-and modules it produces, for instance (`mechane init slurm --job-name walks --account def-me
---time 02:00:00 --cpus-per-task 8 --mem 20G --container walks.sif --bind /scratch --module
-apptainer/1.4.5`):
-
 ```bash
-#!/bin/bash
-#SBATCH --job-name=walks
-#SBATCH --account=def-me
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=20G
-#SBATCH --time=02:00:00
-#SBATCH --output=logs/%x_%A_%a.out
-#SBATCH --error=logs/%x_%A_%a.err
-
-# Each array task runs one task of a plan made with `mechane plan`:
-#
-#   mkdir -p logs
-#   mechane setup --params-file params.py
-#   ARRAY=$(mechane plan --manifest-path MANIFEST --batch-size 10 \
-#           --output plan.json --format array)
-#   sbatch --array="$ARRAY" THIS_SCRIPT plan.json
-#
-# Add --unfinished to `mechane plan` to resubmit only what is missing or failed.
-
-set -eo pipefail
-module load apptainer/1.4.5
-set -u  # after `module load`: module systems often read unset variables
-
-PLAN="${1:?usage: sbatch --array=... THIS_SCRIPT plan.json}"
-
-apptainer exec --bind /scratch walks.sif mechane run-plan --plan-file "$PLAN" --task-id "$SLURM_ARRAY_TASK_ID"
+for t in $(seq 0 11); do mechane run-plan --plan-file plan.json --task-id $t; done
 ```
 
-`--array` is deliberately not in the script: `mechane plan --format array` gives it at submission
-time, so there is no number to keep in sync by hand. Add `--partition` if your cluster needs one.
+In an array job the array index is the task id (for example
+`mechane run-plan --plan-file plan.json --task-id "$SLURM_ARRAY_TASK_ID"`). The plan file is the
+contract between planning and running time, so task `N` always means the same instances, even
+while other tasks finish.
 
-### Writing the batching by hand
-
-If you prefer your own script, `run-batch` addresses work as `(manifest, experiment_id,
-instance_ids)`. A template that maps one flat array index to a batch of instances of one experiment
-(adapt resources and paths):
-
-```bash
-#!/bin/bash
-#SBATCH --job-name=walks
-#SBATCH --array=0-11                 # = n_experiments * batches_per_experiment
-#SBATCH --cpus-per-task=1
-#SBATCH --time=01:00:00
-#SBATCH --output=logs/%x_%A_%a.out
-
-MANIFEST=results/walks/manifest.json
-N_INSTANCES=20                       # num_instances in params.py
-BATCH_SIZE=10
-BATCHES_PER_EXP=$(( (N_INSTANCES + BATCH_SIZE - 1) / BATCH_SIZE ))
-
-EXPERIMENT_ID=$(( SLURM_ARRAY_TASK_ID / BATCHES_PER_EXP ))
-BATCH=$(( SLURM_ARRAY_TASK_ID % BATCHES_PER_EXP ))
-START=$(( BATCH * BATCH_SIZE ))
-END=$(( START + BATCH_SIZE - 1 ))
-(( END >= N_INSTANCES )) && END=$(( N_INSTANCES - 1 ))   # last, partial batch
-
-mechane run-batch --manifest-path "$MANIFEST" \
-    --experiment-id "$EXPERIMENT_ID" \
-    --instance-ids "$(seq -s, $START $END)"
-```
-
-For 6 experiments × 2 batches that is `--array=0-11`. Batching keeps the array under your
-cluster's `MaxArraySize` and amortizes startup time, since the manifest is loaded once per batch.
-The index arithmetic above was checked locally (every `(experiment, instance)` pair is covered
-exactly once, including partial last batches), but the script itself needs your site's modules,
-environment activation and partitions. The `END` cap matters: `run-batch` does not check ids, so
-without it the last batch would run instances past `num_instances`.
-
-### Practical notes
-
-- Run `mechane setup` **before** submitting, so every directory already exists and array tasks
-  never race on `mkdir`.
+- `mechane plan --unfinished` plans only the instances that are missing or failed, so a new plan
+  covers exactly what is left. `--experiment-id` and `--where` plan some experiments only.
+- A plan belongs to its manifest. It records experiment ids, and `run-plan` does not check that
+  the manifest still numbers its experiments the same way. After editing `PARAMS` and re-running
+  `setup`, make a new plan.
+- If you write the batching yourself with `run-batch`, cap the last batch at `num_instances - 1`:
+  `run-batch` does not check ids, so a partial last batch would otherwise run instances past the
+  end.
+- Run `mechane setup` **before** starting tasks, so every directory already exists and parallel
+  tasks never race on `mkdir`.
 - Make sure the job's environment can import your lab module (activate the same virtualenv,
-  install your lab as a package, or `export PYTHONPATH=…` inside the script).
-- `mechane status`, `mechane aggregate` and `mechane list` are cheap to run on the login node
-  (see the scale note under [limitations](#design-notes-and-limitations)).
-- Because finished instances are skipped, resubmitting the same array after a failure or a
-  time-out only does the missing work.
-- Any other scheduler or workflow engine can drive `mechane run` or `mechane run-plan` the same
-  way, since each instance is addressed by the manifest path and two integers. From Python,
-  `mechane.core.runner.run_batch` does what `mechane run-batch` does, without the command line (see
-  [Python API at a glance](#python-api-at-a-glance)).
+  install your lab as a package, or `export PYTHONPATH=…` in the job).
+- `mechane status`, `mechane aggregate` and `mechane list` are cheap to run on a login node (see
+  the scale note under [limitations](#design-notes-and-limitations)).
+- From Python, `mechane.core.runner.run_batch` does what `mechane run-batch` does, without the
+  command line (see [Python API at a glance](#python-api-at-a-glance)).
 
 ## Inspecting and maintaining a sweep
 
@@ -727,11 +710,11 @@ $ mechane errors --manifest-path $MANIFEST --examples 1
         ... and 39 more
 ```
 
-After fixing the code, `mechane plan --manifest-path $MANIFEST --batch-size 10 --unfinished
---format array` prints `0-3`: the failed instances are planned again, and nothing else.
+After fixing the code, `mechane plan --manifest-path $MANIFEST --batch-size 10 --unfinished` plans
+the failed instances again, and nothing else (`40 instance(s) in 4 task(s) of up to 10`).
 
 **How long do instances take?** `stats` reports wall times from the results themselves, and with
-`--batch-size` suggests a SLURM time limit (p95 of the slowest experiment × batch size ×
+`--batch-size` suggests a time limit in minutes (p95 of the slowest experiment × batch size ×
 `--margin`, a heuristic that cannot know about a slower case that has not run yet):
 
 ```
@@ -745,7 +728,7 @@ experiment  done   median  p95   max   total
 5           0/20   -       -     -     0ms
 
 Total instance time: 261ms
-Suggested --time for 10 instance(s) per task: 00:01:00 (slowest p95 x 10 x 1.25; a heuristic)
+Suggested time limit for 10 instance(s) per task: 1 min (slowest p95 x 10 x 1.25; a heuristic)
 ```
 
 **Is anything inconsistent?** `doctor` checks the results on disk and changes nothing. Here a
@@ -888,7 +871,8 @@ likewise importable but not part of the top-level API.
 - Not a workflow/DAG engine: instances are independent. If your jobs have stage dependencies you
   can still drive `mechane run` or `mechane run-plan` from a workflow tool.
 - No database, server or remote execution.
-- Does not submit SLURM jobs itself: `plan` and `init slurm` only print what to submit.
+- Does not submit jobs or talk to a scheduler. It gives schedulers and workflow tools stable
+  commands to call; see [Using mechane with Snakemake](#using-mechane-with-snakemake).
 
 **Known limitations**
 
@@ -929,7 +913,7 @@ likewise importable but not part of the top-level API.
 
 | Symptom | Cause and fix |
 |---|---|
-| `ModuleNotFoundError: my_lab` when running `mechane …` | The console script does not put the current directory on `sys.path`. Install your lab as a package, or `export PYTHONPATH=$PWD` (and do the same inside your sbatch script). |
+| `ModuleNotFoundError: my_lab` when running `mechane …` | The console script does not put the current directory on `sys.path`. Install your lab as a package, or `export PYTHONPATH=$PWD` (and do the same in your job script; the Snakemake example sets it with `shell.prefix`). |
 | `… is not importable by reference` at `setup` | The lab is defined in `__main__` or a local scope. Move it to an importable module. |
 | `Experiments N and M map to the same directory` | They differ only in `hash_exclude` fields, or the sweep repeats a point. Remove the duplicate or make the differing field part of the hash. |
 | `Unknown configs keys […]` | A top-level key in `PARAMS` is not `seed`, `num_instances` or a section name. Check for a typo. |
@@ -947,9 +931,10 @@ likewise importable but not part of the top-level API.
 | `ValueError: invalid literal for int()` from `run-batch` | `--instance-ids` takes comma-separated integers (`0,1,2`). `plan` and `run-plan` avoid writing ids by hand. |
 | `AttributeError: module 'external_params' has no attribute 'ROOT'` | The params file must define `ROOT`, `LABORATORY` and `PARAMS`. |
 | `Error: unknown parameter 'x'; available: […]` | A `--where` key must be a dotted parameter as in the manifest (or `seed`, `num_instances`, `experiment_id`). `mechane list --all` shows the parameters. |
-| `Error: task id N is out of range: the plan has M task(s)` | The array is larger than the plan. Take `--array` from the same `mechane plan` call that wrote the plan file (`--output plan.json --format array`). |
+| `Error: task id N is out of range: the plan has M task(s)` | The scheduler ran more tasks than the plan has. Task ids go from 0 to the number of tasks minus one, which the first line of `mechane plan` shows; use the plan file the job was given. |
 | `Error: refusing to remove the results of every experiment` | `clean --what results` needs `--experiment-id` or `--where`, or `--all-experiments`. |
 | `NOT reproduced: the replay differs from the stored result` | The code changed since the instance ran (`mechane doctor` shows mixed code versions), the computation is not deterministic, or the difference is numerical noise that `--rtol` would absorb. |
+| Snakemake says `Nothing to be done` although results were deleted or cleaned | Its `done/` files do not know about that. Run `snakemake --forcerun run_task` (cheap: finished instances are skipped). |
 | `Cannot serialize … to JSON` | A parameter or output is a type `to_jsonable` doesn't know. Convert it to a plain type before returning it. |
 
 ## Development
@@ -988,7 +973,7 @@ src/mechane/
     params.py          load_params_file: ROOT / LABORATORY / PARAMS
     runner.py          run_instance, run_batch: skip, execute, save, record failures
     selection.py       --experiment-id / --where: choosing experiments
-    plan.py            SLURM array plans (build, save, read)
+    plan.py            plans: which instances each task runs (build, save, read)
     errors.py          failed instances grouped by error
     doctor.py          consistency checks on the results on disk
     stats.py           wall-time statistics, disk usage, suggested time limit
@@ -997,7 +982,7 @@ src/mechane/
     shell.py           the namespace of `mechane shell`
     export.py          results as a flat table
     clean.py           find and remove job.err files, results, stray directories
-    scaffold.py        text of a new laboratory and of an sbatch script
+    scaffold.py        text of a new laboratory
   utils/               leaf helpers: standard library and numpy only
     sweep.py           grid / zipped / product / chain
     serialization.py   to_jsonable, stable_hash, flatten
@@ -1012,6 +997,8 @@ src/mechane/
     commands/          one module per command (setup, run, run_batch, aggregate, status, plan,
                        run_plan, errors, doctor, stats, list_experiments, replay, shell, export,
                        clean, init)
+examples/
+  snakemake/           a project that uses mechane with Snakemake: lab, sweep, Snakefile, analysis
 tests/
   toy.py               a minimal non-trivial lab, a template for new ones
   conftest.py          fixtures: `register_laboratory`, a set-up two-experiment `lab`, helpers
@@ -1026,6 +1013,7 @@ tests/
   test_selection.py, test_plan.py, test_errors.py, test_doctor.py, test_stats.py,
   test_listing.py, test_replay.py, test_export.py, test_clean.py, test_scaffold.py
                        the logic of each newer command, in `core`
+  test_examples.py     the Snakemake example keeps working (lab, analysis, mechane calls)
   test_architecture.py the layering rules below, enforced on the imports
 ```
 

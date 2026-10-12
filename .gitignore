@@ -193,3 +193,8 @@ pyrightconfig.json
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,python
+
+examples/snakemake/.snakemake
+examples/snakemake/done
+examples/snakemake/results
+examples/snakemake/*.json
