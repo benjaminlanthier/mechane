@@ -4,6 +4,7 @@ import json
 
 OUTPUT_PATH = "outputs"
 LAB_NAME = "decay"
+PARAMS_FILE = "params.py"
 MANIFEST_PATH = f"{OUTPUT_PATH}/{LAB_NAME}"
 MANIFEST = f"{MANIFEST_PATH}/manifest.json"  # ROOT in params.py, plus manifest.json
 PLAN = "plan.json"
@@ -19,12 +20,11 @@ rule all:
 
 rule setup:  # stage 1: expand the sweep and write the manifest
     input:
-        "params.py",
-        "decay.py",
+        PARAMS_FILE,
     output:
         MANIFEST,
     shell:
-        "mechane setup --params-file {input[0]}"
+        "mechane setup --params-file {input}"
 
 
 checkpoint make_plan:  # stage 2: split the work into tasks (known only once the manifest exists)
