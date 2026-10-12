@@ -12,8 +12,8 @@ import numpy as np
 import pytest
 
 from mechane import Laboratory, expand, grid, to_jsonable, zipped
-from mechane.utils import provenance
 from mechane.core.registry import laboratory_ref, resolve_laboratory
+from mechane.utils import provenance
 from toy import Kind, ToyLab
 
 

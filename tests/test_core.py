@@ -54,7 +54,7 @@ def test_enum_coercion_looks_through_unions_and_optionals():
 def test_unresolvable_annotations_disable_coercion_instead_of_failing():
     @dataclass(frozen=True)
     class Dangling(Config):
-        kind: "NotDefinedAnywhere"  # noqa: F821  # ty: ignore[unresolved-reference]
+        kind: "NotDefinedAnywhere"  # type: ignore # noqa: F821  # ty: ignore[unresolved-reference]
 
     assert Dangling(kind="gauss").kind == "gauss"  # kept as given
 
