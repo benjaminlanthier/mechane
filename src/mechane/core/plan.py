@@ -1,7 +1,7 @@
-"""Planning SLURM array jobs: which instances each array task runs.
+"""Planning tasks: which instances each unit of scheduled work runs.
 
 A *plan* splits the work into tasks of at most `batch_size` instances of one experiment. Saved as
-JSON it is the contract between submission time and run time: array task `N` always runs the same
+JSON it is the contract between planning time and run time: task `N` always runs the same
 instances, even when other tasks finish in the meantime (which would shift an "unfinished only"
 plan that was recomputed inside each job).
 """
@@ -42,13 +42,6 @@ class Plan:
     @property
     def num_instances(self) -> int:
         return sum(len(task.instance_ids) for task in self.tasks)
-
-    @property
-    def array_spec(self) -> str:
-        """The value for `sbatch --array=`: `"0-4"`, `"0"` for a single task, `""` for none."""
-        if not self.tasks:
-            return ""
-        return "0" if len(self.tasks) == 1 else f"0-{len(self.tasks) - 1}"
 
     def task(self, task_id: int) -> Task:
         if not 0 <= task_id < len(self.tasks):

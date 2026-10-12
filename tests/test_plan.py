@@ -1,13 +1,11 @@
-"""`mechane.core.plan`: splitting work into SLURM array tasks."""
+"""`mechane.core.plan`: splitting work into tasks."""
 
 import json
-from pathlib import Path
 
 import pytest
 
 from mechane.core.plan import (
     PLAN_VERSION,
-    Plan,
     PlanError,
     Task,
     build_plan,
@@ -30,12 +28,6 @@ def test_every_instance_is_planned_once_in_batches(lab):
         Task(1, (4, 5)),
     )
     assert plan.num_instances == 12
-
-
-@pytest.mark.parametrize(("n_tasks_wanted", "spec"), [(0, ""), (1, "0"), (2, "0-1"), (4, "0-3")])
-def test_array_spec(n_tasks_wanted, spec):
-    tasks = tuple(Task(0, (i,)) for i in range(n_tasks_wanted))
-    assert Plan(Path("m.json"), 1, tasks).array_spec == spec
 
 
 def test_a_selection_of_experiments_is_planned_in_id_order(lab):

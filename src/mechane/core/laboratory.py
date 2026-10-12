@@ -204,7 +204,7 @@ class Laboratory:
         }
 
     def setup(self) -> None:
-        """Write the manifest and create every instances directory up front, so array tasks
+        """Write the manifest and create every instances directory up front, so parallel tasks
         never race on `mkdir`."""
         ref = laboratory_ref(type(self))
         try:

@@ -19,7 +19,7 @@ from mechane.core.plan import build_plan, plan_to_dict, write_plan
     type=click.IntRange(min=1),
     default=1,
     show_default=True,
-    help="Instances per array task.",
+    help="Instances per task.",
 )
 @click.option(
     "--unfinished",
@@ -30,15 +30,15 @@ from mechane.core.plan import build_plan, plan_to_dict, write_plan
     "--output",
     type=click.Path(dir_okay=False, path_type=Path),
     default=None,
-    help="Save the plan here: array tasks run it with `mechane run-plan`.",
+    help="Save the plan here: `mechane run-plan` runs one of its tasks.",
 )
 @click.option(
     "--format",
     "fmt",
-    type=click.Choice(["table", "array", "json"]),
+    type=click.Choice(["table", "json"]),
     default="table",
     show_default=True,
-    help="`array` prints just the value for `sbatch --array=`.",
+    help="`json` is the plan file format, for scripts and workflow tools.",
 )
 def plan(
     manifest_path: Path,
@@ -49,7 +49,7 @@ def plan(
     output: Path | None,
     fmt: str,
 ) -> None:
-    """Split the work into SLURM array tasks and say how to submit them."""
+    """Split the work into tasks of a few instances each (a unit of scheduled work)."""
     lab = load_laboratory(manifest_path)
     the_plan = build_plan(
         lab,
@@ -59,9 +59,7 @@ def plan(
     )
     if output is not None:
         write_plan(the_plan, output)
-    if fmt == "array":
-        click.echo(the_plan.array_spec)
-    elif fmt == "json":
+    if fmt == "json":
         click.echo(json.dumps(plan_to_dict(the_plan), indent=2))
     else:
         click.echo(format_plan(the_plan))

@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 
 from mechane.cli._options import MANIFEST_PATH, selected, selection_options
-from mechane.cli._output import duration, format_table, size, slurm_time
+from mechane.cli._output import duration, format_table, minutes, size
 from mechane.core.manifest import load_laboratory
 from mechane.core.stats import compute_stats, suggested_walltime
 
@@ -18,7 +18,7 @@ from mechane.core.stats import compute_stats, suggested_walltime
     "--batch-size",
     type=click.IntRange(min=1),
     default=None,
-    help="Suggest a SLURM --time for array tasks of this many instances.",
+    help="Suggest a time limit for tasks of this many instances.",
 )
 @click.option(
     "--margin",
@@ -59,9 +59,9 @@ def stats(
     if batch_size is not None:
         seconds = suggested_walltime(results, batch_size, margin)
         if seconds is None:
-            click.echo("No timings yet: nothing has finished, so no --time can be suggested.")
+            click.echo("No timings yet: nothing has finished, so no time limit can be suggested.")
         else:
             click.echo(
-                f"Suggested --time for {batch_size} instance(s) per task: {slurm_time(seconds)} "
-                f"(slowest p95 x {batch_size} x {margin:g}; a heuristic)"
+                f"Suggested time limit for {batch_size} instance(s) per task: "
+                f"{minutes(seconds)} min (slowest p95 x {batch_size} x {margin:g}; a heuristic)"
             )

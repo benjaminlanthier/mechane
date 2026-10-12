@@ -17,8 +17,8 @@ from mechane.cli._output import (
     finish_batch,
     format_plan,
     format_table,
+    minutes,
     size,
-    slurm_time,
 )
 from mechane.core.plan import Plan, Task
 from mechane.core.runner import (
@@ -228,20 +228,19 @@ def test_size(n, text):
 
 
 @pytest.mark.parametrize(
-    ("seconds", "text"),
+    ("seconds", "expected"),
     [
-        (0, "00:01:00"),  # SLURM needs at least a minute
-        (1, "00:01:00"),
-        (60, "00:01:00"),
-        (61, "00:02:00"),  # always rounded up
-        (300, "00:05:00"),
-        (3600, "01:00:00"),
-        (86400, "1-00:00:00"),
-        (90000, "1-01:00:00"),
+        (0, 1),  # at least a minute
+        (1, 1),
+        (60, 1),
+        (61, 2),  # always rounded up
+        (300, 5),
+        (3600, 60),
+        (90000, 1500),  # no hours or days: a number any scheduler can take
     ],
 )
-def test_slurm_time(seconds, text):
-    assert slurm_time(seconds) == text
+def test_minutes(seconds, expected):
+    assert minutes(seconds) == expected
 
 
 def test_format_table_aligns_columns_without_trailing_spaces():
@@ -257,7 +256,9 @@ def test_format_plan():
 
     plan = Plan(Path("m.json"), 4, (Task(0, (0, 1, 2, 3)), Task(1, (4, 6))))
     lines = format_plan(plan).splitlines()
-    assert lines[0] == "6 instance(s) in 2 task(s) of up to 4: sbatch --array=0-1"
+    assert lines[0] == (
+        "6 instance(s) in 2 task(s) of up to 4; run task N (0 to 1) with `mechane run-plan`"
+    )
     assert lines[2] == "task  experiment  count  instances"
     assert lines[3].split() == ["0", "0", "4", "0-3"]
     assert lines[4].split() == ["1", "1", "2", "4,6"]

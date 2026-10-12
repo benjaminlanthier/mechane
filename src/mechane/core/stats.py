@@ -72,7 +72,7 @@ def compute_stats(experiments: Iterable[Experiment], disk: bool = False) -> list
 def suggested_walltime(
     stats: Sequence[ExperimentStats], batch_size: int, margin: float = 1.25
 ) -> float | None:
-    """A time limit, in seconds, for an array task running `batch_size` instances back to back:
+    """A time limit, in seconds, for a task running `batch_size` instances back to back:
     the slowest experiment's p95 per instance, times `batch_size`, times a safety `margin`.
     None when nothing has finished yet. A heuristic: it cannot know about a slower, unrun case."""
     p95s = [s.wall_p95 for s in stats if s.wall_p95 is not None]

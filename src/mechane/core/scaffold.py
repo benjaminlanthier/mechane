@@ -1,6 +1,6 @@
-"""Starting files for a new laboratory and for running it on SLURM.
+"""Starting files for a new laboratory.
 
-These functions only produce text (and `write_files` puts it on disk). The generated lab runs as
+`render_lab` only produces text (and `write_files` puts it on disk). The generated lab runs as
 it is: `setup`, `run-batch` and `aggregate` work immediately, and only the TODOs are yours.
 """
 
@@ -132,62 +132,6 @@ PARAMS = {{
 }}
 '''
     return {f"{name}.py": module, "params.py": params}
-
-
-def render_slurm(
-    job_name: str = "mechane",
-    time: str = "01:00:00",
-    cpus_per_task: int = 1,
-    mem: str = "4G",
-    account: str | None = None,
-    partition: str | None = None,
-    container: str | None = None,
-    binds: Sequence[str] = (),
-    modules: Sequence[str] = (),
-) -> str:
-    """An sbatch script whose array tasks each run one task of a `mechane plan` file.
-
-    `--array` is deliberately not in the script: `mechane plan --format array` gives it at
-    submission time, so there is no number to keep in sync by hand.
-    """
-    directives = [f"--job-name={job_name}"]
-    if account:
-        directives.append(f"--account={account}")
-    if partition:
-        directives.append(f"--partition={partition}")
-    directives += [
-        "--ntasks=1",
-        f"--cpus-per-task={cpus_per_task}",
-        f"--mem={mem}",
-        f"--time={time}",
-        "--output=logs/%x_%A_%a.out",
-        "--error=logs/%x_%A_%a.err",
-    ]
-    prefix = ""
-    if container:
-        bind_flags = "".join(f"--bind {b} " for b in binds)
-        prefix = f"apptainer exec {bind_flags}{container} "
-    module_lines = "".join(f"module load {m}\n" for m in modules)
-    sbatch = "".join(f"#SBATCH {d}\n" for d in directives)
-    return f"""#!/bin/bash
-{sbatch}
-# Each array task runs one task of a plan made with `mechane plan`:
-#
-#   mkdir -p logs
-#   mechane setup --params-file params.py
-#   ARRAY=$(mechane plan --manifest-path MANIFEST --batch-size 10 \\
-#           --output plan.json --format array)
-#   sbatch --array="$ARRAY" THIS_SCRIPT plan.json
-#
-# Add --unfinished to `mechane plan` to resubmit only what is missing or failed.
-
-set -eo pipefail
-{module_lines}set -u  # after `module load`: module systems often read unset variables
-
-PLAN="${{1:?usage: sbatch --array=... THIS_SCRIPT plan.json}}"
-
-{prefix}mechane run-plan --plan-file "$PLAN" --task-id "$SLURM_ARRAY_TASK_ID"
-"""
 
 
 def write_files(directory: Path, files: Mapping[str, str], force: bool = False) -> list[Path]:
