@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import click
 
 from mechane.cli._options import EXPERIMENT_ID, INSTANCE_IDS, MANIFEST_PATH, OVERWRITE
-from mechane.cli._output import echo_event
+from mechane.cli._output import echo_event, finish_batch
 from mechane.core.manifest import load_laboratory
 from mechane.core.runner import run_batch
 
@@ -37,9 +36,4 @@ def simulate_batch(
         continue_on_error=continue_on_error,
         listener=echo_event,
     )
-    if result.failed:
-        click.echo(
-            f"[BatchJob] {len(result.failed)}/{len(ids)} failed: {list(result.failed)}", err=True
-        )
-        sys.exit(1)
-    click.echo(f"[BatchJob] Completed {len(ids)}/{len(ids)} instance(s).")
+    finish_batch(result)

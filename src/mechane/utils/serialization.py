@@ -44,3 +44,18 @@ def to_jsonable(obj: Any) -> Any:
 def stable_hash(data: Any, length: int = 24) -> str:
     blob = json.dumps(to_jsonable(data), sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(blob).hexdigest()[:length]
+
+
+def flatten(data: Mapping[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Nested mappings to dotted keys: `{"a": {"b": 1}}` -> `{"a.b": 1}`.
+
+    Only mappings are descended into: lists stay values, and an empty mapping is kept as a value.
+    """
+    flat: dict[str, Any] = {}
+    for key, value in data.items():
+        name = f"{prefix}{key}"
+        if isinstance(value, Mapping) and value:
+            flat.update(flatten(value, f"{name}."))
+        else:
+            flat[name] = value
+    return flat

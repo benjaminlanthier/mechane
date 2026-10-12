@@ -11,10 +11,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from mechane import Laboratory, expand, grid, to_jsonable, zipped
-from mechane.core.registry import laboratory_ref, resolve_laboratory
+from mechane import expand, grid, to_jsonable, zipped
 from mechane.utils import provenance
-from toy import Kind, ToyLab
+from mechane.utils.ranges import compact_ranges, parse_ranges
+from mechane.utils.serialization import flatten
+from toy import Kind
 
 
 # --------------------------------------------------------------------------- serialization
@@ -77,40 +78,6 @@ def test_axes_must_be_sequences_of_values(bad_axis):
         grid(a=bad_axis)
 
 
-# --------------------------------------------------------------------------- registry
-class Holder:
-    class Inner(ToyLab):
-        pass
-
-
-def test_laboratory_references_round_trip():
-    assert laboratory_ref(ToyLab) == "toy:ToyLab"
-    assert resolve_laboratory("toy:ToyLab") is ToyLab
-    # Nested classes are reached through their dotted qualified name.
-    assert laboratory_ref(Holder.Inner).endswith(":Holder.Inner")
-    assert resolve_laboratory(laboratory_ref(Holder.Inner)) is Holder.Inner
-
-
-def test_entry_point_names_resolve(register_laboratory):
-    register_laboratory(toy="toy:ToyLab")
-    lab: type[Laboratory] = resolve_laboratory("toy")
-    assert lab is ToyLab
-
-
-def test_unknown_entry_point_lists_the_registered_names(register_laboratory):
-    register_laboratory(toy="toy:ToyLab", other="toy:ToyLab")
-    with pytest.raises(
-        KeyError, match=r"Unknown laboratory 'nope'.*Registered: \['other', 'toy'\]"
-    ):
-        resolve_laboratory("nope")
-
-
-def test_unknown_entry_point_without_any_registered_lab(register_laboratory):
-    register_laboratory()
-    with pytest.raises(KeyError, match=r"Registered: \[\]"):
-        resolve_laboratory("toy")
-
-
 # --------------------------------------------------------------------------- provenance
 @pytest.fixture(autouse=True)
 def fresh_git_cache():
@@ -146,6 +113,8 @@ def test_git_info_reports_the_commit_and_whether_the_tree_is_dirty(
     def fake_run(command, **kwargs):
         assert command[0] == "git"
         assert kwargs["cwd"] == str(tmp_path)
+        if command[1] == "status":
+            assert "--untracked-files=no" in command
         return SimpleNamespace(stdout=outputs[command[1]])
 
     # Replace the name inside `provenance` only: the real `subprocess.run` is shared with
@@ -200,9 +169,75 @@ def test_git_info_reads_a_real_repository(tmp_path, monkeypatch):
     assert re.fullmatch(r"[0-9a-f]{40,64}", clean["commit"])
     assert clean["dirty"] is False
 
+    # Untracked files (logs, results, __pycache__) say nothing about the code that ran.
+    provenance._git_info.cache_clear()
+    (tmp_path / "untracked.log").write_text("noise")
+    untracked = provenance._git_info(str(tmp_path))
+    assert untracked is not None and untracked["dirty"] is False
+
     provenance._git_info.cache_clear()
     tracked.write_text("two")
     dirty = provenance._git_info(str(tmp_path))
     assert dirty is not None
     assert dirty["commit"] == clean["commit"]
     assert dirty["dirty"] is True
+
+
+# --------------------------------------------------------------------------- ranges
+@pytest.mark.parametrize(
+    ("ids", "text"),
+    [
+        ([], ""),
+        ([3], "3"),
+        ([0, 1, 2, 5, 7, 8], "0-2,5,7-8"),
+        ([8, 7, 5, 2, 1, 0, 1], "0-2,5,7-8"),  # unsorted, with a duplicate
+        ([4, 5], "4-5"),
+    ],
+)
+def test_compact_ranges(ids, text):
+    assert compact_ranges(ids) == text
+
+
+@pytest.mark.parametrize(
+    ("text", "ids"),
+    [
+        ("", []),
+        ("3", [3]),
+        ("0-2,5", [0, 1, 2, 5]),
+        (" 3 , 4-5 ,, ", [3, 4, 5]),  # blanks and empty parts are ignored
+        ("5,1-2,2", [5, 1, 2]),  # first-seen order, no duplicates
+        ("7-7", [7]),
+    ],
+)
+def test_parse_ranges(text, ids):
+    assert parse_ranges(text) == ids
+
+
+@pytest.mark.parametrize("text", ["a", "-1", "1-", "1--3", "0x10", "1.5"])
+def test_parse_ranges_rejects_what_is_not_an_id_or_range(text):
+    with pytest.raises(ValueError, match="invalid id or range"):
+        parse_ranges(text)
+
+
+def test_parse_ranges_rejects_descending_ranges():
+    with pytest.raises(ValueError, match="empty range '3-1'"):
+        parse_ranges("0,3-1")
+
+
+def test_the_two_notations_are_inverses():
+    ids = [0, 1, 2, 5, 9, 10, 11]
+    assert parse_ranges(compact_ranges(ids)) == ids
+
+
+# --------------------------------------------------------------------------- flatten
+def test_flatten_joins_nested_keys_with_dots():
+    assert flatten({"a": {"b": 1, "c": {"d": 2}}, "e": 3}) == {"a.b": 1, "a.c.d": 2, "e": 3}
+
+
+def test_flatten_leaves_lists_and_empty_mappings_alone():
+    data = {"a": [1, {"b": 2}], "empty": {}, "x": {"y": []}}
+    assert flatten(data) == {"a": [1, {"b": 2}], "empty": {}, "x.y": []}
+
+
+def test_flatten_accepts_a_prefix():
+    assert flatten({"b": {"c": 1}}, "a.") == {"a.b.c": 1}

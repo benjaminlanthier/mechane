@@ -21,7 +21,8 @@ from mechane import (
     zipped,
 )
 from mechane.core import laboratory as laboratory_module
-from mechane.core.laboratory import read_manifest
+from mechane.core.manifest import read_manifest
+from mechane.core.registry import laboratory_ref, resolve_laboratory
 from toy import Kind, Model, ToyInstance, ToyLab
 
 PARAMS = {
@@ -54,7 +55,7 @@ def test_enum_coercion_looks_through_unions_and_optionals():
 def test_unresolvable_annotations_disable_coercion_instead_of_failing():
     @dataclass(frozen=True)
     class Dangling(Config):
-        kind: "NotDefinedAnywhere"  # type: ignore # noqa: F821  # ty: ignore[unresolved-reference]
+        kind: "NotDefinedAnywhere"  # noqa: F821  # ty: ignore[unresolved-reference]
 
     assert Dangling(kind="gauss").kind == "gauss"  # kept as given
 
@@ -308,6 +309,40 @@ def test_aggregate_refreshes_known_experiments_and_keeps_the_others(tmp_path):
     assert aggregated["0"]["instances"] == {"0": {"v": 1}}
     assert aggregated["0"]["missing"] == list(range(1, 12))
     assert aggregated["1"]["num_done"] == 0
+
+
+# --------------------------------------------------------------------------- registry
+class Holder:
+    class Inner(ToyLab):
+        pass
+
+
+def test_laboratory_references_round_trip():
+    assert laboratory_ref(ToyLab) == "toy:ToyLab"
+    assert resolve_laboratory("toy:ToyLab") is ToyLab
+    # Nested classes are reached through their dotted qualified name.
+    assert laboratory_ref(Holder.Inner).endswith(":Holder.Inner")
+    assert resolve_laboratory(laboratory_ref(Holder.Inner)) is Holder.Inner
+
+
+def test_entry_point_names_resolve(register_laboratory):
+    register_laboratory(toy="toy:ToyLab")
+    lab: type[Laboratory] = resolve_laboratory("toy")
+    assert lab is ToyLab
+
+
+def test_unknown_entry_point_lists_the_registered_names(register_laboratory):
+    register_laboratory(toy="toy:ToyLab", other="toy:ToyLab")
+    with pytest.raises(
+        KeyError, match=r"Unknown laboratory 'nope'.*Registered: \['other', 'toy'\]"
+    ):
+        resolve_laboratory("nope")
+
+
+def test_unknown_entry_point_without_any_registered_lab(register_laboratory):
+    register_laboratory()
+    with pytest.raises(KeyError, match=r"Registered: \[\]"):
+        resolve_laboratory("toy")
 
 
 # --------------------------------------------------------------------------- manifests
