@@ -1,5 +1,5 @@
 """Click options shared by several commands. They keep the option names of the original
-`experiments` scripts so existing sbatch scripts work unchanged."""
+`experiments` scripts so existing scripts work unchanged."""
 
 from __future__ import annotations
 

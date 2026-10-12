@@ -1,7 +1,5 @@
-"""`mechane.core.scaffold`: starting files for a laboratory and for SLURM."""
+"""`mechane.core.scaffold`: starting files for a laboratory."""
 
-import shutil
-import subprocess
 import sys
 
 import pytest
@@ -9,7 +7,7 @@ from click.testing import CliRunner
 
 from mechane.cli import aggregate_results, setup_lab, simulate_batch
 from mechane.core.manifest import load_laboratory
-from mechane.core.scaffold import ScaffoldError, render_lab, render_slurm, write_files
+from mechane.core.scaffold import ScaffoldError, render_lab, write_files
 
 
 @pytest.fixture
@@ -85,69 +83,6 @@ def test_a_laboratory_name_must_be_a_lowercase_identifier(name):
 def test_sections_that_would_produce_broken_code_are_rejected(sections, message):
     with pytest.raises(ScaffoldError, match=message):
         render_lab("walk", sections)
-
-
-# --------------------------------------------------------------------------- the SLURM script
-def test_the_default_script_runs_a_task_of_a_plan():
-    script = render_slurm()
-
-    assert script.startswith("#!/bin/bash\n#SBATCH --job-name=mechane\n")
-    for line in (
-        "#SBATCH --ntasks=1",
-        "#SBATCH --cpus-per-task=1",
-        "#SBATCH --mem=4G",
-        "#SBATCH --time=01:00:00",
-        "#SBATCH --output=logs/%x_%A_%a.out",
-        "#SBATCH --error=logs/%x_%A_%a.err",
-    ):
-        assert line in script
-    assert "--account" not in script and "--partition" not in script
-    assert "--array" not in script.replace("--array=", "ARRAY-IN-COMMENT").split("#SBATCH")[0]
-    assert '\nmechane run-plan --plan-file "$PLAN" --task-id "$SLURM_ARRAY_TASK_ID"\n' in script
-    assert "apptainer" not in script
-    assert not any(line.startswith("module load") for line in script.splitlines())
-
-
-def test_the_script_can_run_in_a_container_with_modules():
-    script = render_slurm(
-        job_name="sweep",
-        time="2-00:00:00",
-        cpus_per_task=8,
-        mem="20G",
-        account="def-x",
-        partition="short",
-        container="img.sif",
-        binds=("/scratch", "/data"),
-        modules=("apptainer/1.4.5", "gcc"),
-    )
-
-    for line in (
-        "#SBATCH --job-name=sweep",
-        "#SBATCH --account=def-x",
-        "#SBATCH --partition=short",
-        "#SBATCH --cpus-per-task=8",
-        "#SBATCH --mem=20G",
-        "#SBATCH --time=2-00:00:00",
-        "module load apptainer/1.4.5",
-        "module load gcc",
-    ):
-        assert line in script
-    assert (
-        'apptainer exec --bind /scratch --bind /data img.sif mechane run-plan --plan-file "$PLAN"'
-        in script
-    )
-    # `set -u` comes after `module load`, which often reads unset variables.
-    assert script.index("module load gcc") < script.index("set -u")
-
-
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash is not installed")
-@pytest.mark.parametrize(
-    "kwargs", [{}, {"container": "i.sif", "binds": ("/a",), "modules": ("m",)}]
-)
-def test_the_script_is_valid_bash(tmp_path, kwargs):
-    path = tmp_path / "job.sh"
-    path.write_text(render_slurm(**kwargs))
-    subprocess.run(["bash", "-n", str(path)], check=True)
 
 
 # --------------------------------------------------------------------------- writing files

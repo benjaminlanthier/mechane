@@ -18,6 +18,8 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=500]
       - id: debug-statements
+        # `mechane replay --pdb` opens the debugger on purpose, so that file imports pdb.
+        exclude: ^src/mechane/cli/commands/replay\.py$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.17.0

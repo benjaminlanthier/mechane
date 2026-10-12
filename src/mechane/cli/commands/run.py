@@ -16,6 +16,6 @@ from mechane.core.runner import run_instance
 @INSTANCE_ID
 @OVERWRITE
 def simulate(manifest_path: Path, experiment_id: int, instance_id: int, overwrite: bool) -> None:
-    """Run a single instance (one SLURM array task)."""
+    """Run a single instance."""
     lab = load_laboratory(manifest_path)
     run_instance(lab, experiment_id, instance_id, overwrite=overwrite, listener=echo_event)

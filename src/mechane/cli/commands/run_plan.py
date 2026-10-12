@@ -22,12 +22,12 @@ from mechane.core.runner import run_batch
     "--task-id",
     type=click.IntRange(min=0),
     required=True,
-    help="Which task of the plan to run: the SLURM array index.",
+    help="Which task of the plan to run (0 to the number of tasks minus one).",
 )
 @OVERWRITE
 @click.option("--continue-on-error/--fail-fast", default=True, show_default=True)
 def run_plan(plan_file: Path, task_id: int, overwrite: bool, continue_on_error: bool) -> None:
-    """Run one task of a plan: a batch of instances of one experiment (one SLURM array task)."""
+    """Run one task of a plan: a batch of instances of one experiment."""
     try:
         the_plan = read_plan(plan_file)
         task = the_plan.task(task_id)

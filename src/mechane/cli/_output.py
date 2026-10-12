@@ -1,5 +1,5 @@
 """The CLI's wording: turn events from `mechane.core.runner` into the lines printed on a terminal
-(and in SLURM logs), and the formatting shared by commands that print tables."""
+(and in job logs), and the formatting shared by commands that print tables."""
 
 from __future__ import annotations
 
@@ -80,12 +80,9 @@ def size(num_bytes: int | None) -> str:
     return f"{num_bytes / 1024**exponent:.1f} {_SIZE_UNITS[exponent]}"
 
 
-def slurm_time(seconds: float) -> str:
-    """Round up to whole minutes, in SLURM's `[D-]HH:MM:SS` form (at least one minute)."""
-    minutes = max(1, math.ceil(seconds / 60))
-    hours, minute = divmod(minutes, 60)
-    days, hour = divmod(hours, 24)
-    return f"{days}-{hour:02d}:{minute:02d}:00" if days else f"{hour:02d}:{minute:02d}:00"
+def minutes(seconds: float) -> int:
+    """Whole minutes, rounded up, at least one: a time limit that any scheduler can take."""
+    return max(1, math.ceil(seconds / 60))
 
 
 def format_plan(plan: Plan) -> str:
@@ -93,7 +90,7 @@ def format_plan(plan: Plan) -> str:
         return "Nothing to run: the plan has no tasks."
     head = (
         f"{plan.num_instances} instance(s) in {len(plan.tasks)} task(s) of up to "
-        f"{plan.batch_size}: sbatch --array={plan.array_spec}"
+        f"{plan.batch_size}; run task N (0 to {len(plan.tasks) - 1}) with `mechane run-plan`"
     )
     rows = [
         (i, t.experiment_id, len(t.instance_ids), compact_ranges(t.instance_ids))

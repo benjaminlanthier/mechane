@@ -5,7 +5,6 @@ import code
 import csv
 import io
 import json
-import pdb
 import re
 
 import pytest
@@ -24,6 +23,7 @@ from mechane.cli import (
     run_plan,
     shell,
     stats,
+    status,
 )
 from mechane.core.plan import build_plan, plan_to_dict, write_plan
 from toy import ToyLab
@@ -65,18 +65,18 @@ def test_every_command_is_registered():
 
 
 # --------------------------------------------------------------------------- plan
-def test_plan_prints_the_array_spec_and_a_table(lab):
+def test_plan_prints_a_summary_and_a_table(lab):
     result = invoke(plan, *with_manifest(lab, "--batch-size", 4))
 
     assert result.exit_code == 0, result.output
-    assert "12 instance(s) in 4 task(s) of up to 4: sbatch --array=0-3" in result.stdout
+    assert "12 instance(s) in 4 task(s) of up to 4; run task N (0 to 3)" in result.stdout
     assert "task  experiment  count  instances" in result.stdout
     assert "0-3" in result.stdout and "4-5" in result.stdout
 
 
-def test_plan_array_format_prints_only_the_value_for_sbatch(lab):
-    result = invoke(plan, *with_manifest(lab, "--batch-size", 4, "--format", "array"))
-    assert result.stdout == "0-3\n"
+def test_plan_has_no_scheduler_specific_format(lab):
+    result = invoke(plan, *with_manifest(lab, "--format", "array"))
+    assert result.exit_code == 2  # the plan's JSON has everything a workflow tool needs
 
 
 def test_plan_json_format_is_the_plan_file_format(lab):
@@ -99,19 +99,20 @@ def test_a_saved_plan_is_what_run_plan_runs(lab, tmp_path):
     assert lab.experiment(1).status()["done"] == []
 
 
-def test_plan_unfinished_resubmits_only_what_is_left(lab, run_instances):
-    run_instances(lab, 0, range(6))
+def test_plan_unfinished_covers_only_what_is_left(lab, run_instances):
+    def tasks():
+        result = invoke(
+            plan, *with_manifest(lab, "--batch-size", 4, "--unfinished", "--format", "json")
+        )
+        return json.loads(result.stdout)["tasks"]
 
-    result = invoke(
-        plan, *with_manifest(lab, "--batch-size", 4, "--unfinished", "--format", "array")
-    )
-    assert result.stdout == "0-1\n"  # only experiment 1, in two tasks
+    run_instances(lab, 0, range(6))
+    assert [t["experiment_id"] for t in tasks()] == [1, 1]  # only experiment 1, in two tasks
 
     run_instances(lab, 1, range(6))
+    assert tasks() == []
     result = invoke(plan, *with_manifest(lab, "--unfinished"))
     assert "Nothing to run: the plan has no tasks." in result.stdout
-    result = invoke(plan, *with_manifest(lab, "--unfinished", "--format", "array"))
-    assert result.stdout == "\n"  # an empty value: nothing to submit
 
 
 @pytest.mark.parametrize(
@@ -180,6 +181,36 @@ def test_run_plan_rejects_a_file_that_is_not_a_plan(tmp_path):
     result = invoke(run_plan, "--plan-file", not_a_plan, "--task-id", 0)
     assert result.exit_code == 2
     assert "is not a mechane plan" in result.stderr
+
+
+# --------------------------------------------------------------------------- status --check
+def test_status_check_succeeds_once_everything_is_done(lab, run_instances):
+    for experiment_id in (0, 1):
+        run_instances(lab, experiment_id, range(6))
+
+    result = invoke(status, *with_manifest(lab, "--check"))
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "experiment    1: 6 done, 0 failed, 0 missing" in result.stdout
+
+
+def test_status_check_fails_while_anything_is_missing_or_failed(lab, run_instances, fail_instance):
+    run_instances(lab, 0, range(6))
+    run_instances(lab, 1, range(4))
+    fail_instance(lab, 1, 4)  # instance 4 failed, instance 5 never ran
+
+    result = invoke(status, *with_manifest(lab, "--check"))
+
+    assert result.exit_code == 1
+    assert "2 instance(s) are not done." in result.stderr
+    assert "experiment    1: 4 done, 1 failed, 1 missing" in result.stdout  # still printed
+
+
+def test_status_without_check_exits_0_whatever_the_state(lab):
+    result = invoke(status, *with_manifest(lab))
+    assert result.exit_code == 0
+    assert "experiment    0: 0 done, 0 failed, 6 missing" in result.stdout
 
 
 # --------------------------------------------------------------------------- errors
@@ -295,12 +326,12 @@ def test_stats_suggests_a_time_limit_for_a_batch_size(lab, run_instances):
 
     result = invoke(stats, *with_manifest(lab, "--batch-size", 4))
     assert (
-        "Suggested --time for 4 instance(s) per task: 00:05:00 (slowest p95 x 4 x 1.25"
+        "Suggested time limit for 4 instance(s) per task: 5 min (slowest p95 x 4 x 1.25"
         in result.stdout
     )
 
     result = invoke(stats, *with_manifest(lab, "--batch-size", 4, "--margin", 2))
-    assert "00:08:00 (slowest p95 x 4 x 2" in result.stdout
+    assert "8 min (slowest p95 x 4 x 2" in result.stdout
 
 
 def test_stats_without_timings_cannot_suggest_anything(lab):
@@ -452,7 +483,7 @@ def test_replay_can_keep_its_scratch_directory(lab, tmp_path):
 
 def test_replay_opens_the_debugger_only_when_asked(failing_lab, monkeypatch):
     opened = []
-    monkeypatch.setattr(pdb, "post_mortem", lambda tb: opened.append(tb))
+    monkeypatch.setattr("pdb.post_mortem", lambda tb: opened.append(tb))
     args = with_manifest(failing_lab, "--experiment-id", 0, "--instance-id", 0)
 
     plain = invoke(replay, *args)
@@ -650,42 +681,3 @@ def test_init_lab_rejects_a_bad_name(tmp_path):
     result = invoke(init, "lab", "Bad-Name", "--directory", tmp_path)
     assert result.exit_code == 2
     assert "must be a lowercase identifier" in result.stderr
-
-
-def test_init_slurm_prints_a_script(tmp_path):
-    result = invoke(
-        init,
-        "slurm",
-        "--job-name",
-        "sweep",
-        "--account",
-        "def-x",
-        "--cpus-per-task",
-        4,
-        "--container",
-        "img.sif",
-        "--bind",
-        "/scratch",
-        "--module",
-        "apptainer",
-    )
-
-    assert result.exit_code == 0
-    assert result.stdout.startswith("#!/bin/bash\n#SBATCH --job-name=sweep\n")
-    assert (
-        "#SBATCH --account=def-x" in result.stdout and "#SBATCH --cpus-per-task=4" in result.stdout
-    )
-    assert "module load apptainer" in result.stdout
-    assert "apptainer exec --bind /scratch img.sif mechane run-plan" in result.stdout
-
-
-def test_init_slurm_can_write_a_file_and_refuses_to_overwrite_it(tmp_path):
-    target = tmp_path / "scripts" / "job.sh"
-
-    first = invoke(init, "slurm", "--output", target)
-    assert first.exit_code == 0 and f"[Init] wrote {target}" in first.stdout
-    assert target.read_text().startswith("#!/bin/bash")
-
-    again = invoke(init, "slurm", "--output", target)
-    assert again.exit_code == 2 and "use --force" in again.stderr
-    assert invoke(init, "slurm", "--output", target, "--force").exit_code == 0
