@@ -1,0 +1,77 @@
+# Snakemake decides the order of the stages; mechane decides what each stage runs and where the
+# results go. Run it with:   snakemake -c4
+import json
+
+MANIFEST = "results/decay/manifest.json"  # ROOT in params.py, plus manifest.json
+PLAN = "plan.json"
+BATCH_SIZE = 5  # instances per Snakemake job: one job per mechane task, not one per instance
+
+shell.prefix('export PYTHONPATH="$PWD:$PYTHONPATH"; ')  # so that `mechane` can import decay.py
+
+
+rule all:
+    input:
+        "results/summary.txt",
+
+
+rule setup:  # stage 1: expand the sweep and write the manifest
+    input:
+        "params.py",
+        "decay.py",
+    output:
+        MANIFEST,
+    shell:
+        "mechane setup --params-file {input[0]}"
+
+
+checkpoint make_plan:  # stage 2: split the work into tasks (known only once the manifest exists)
+    input:
+        MANIFEST,
+    output:
+        PLAN,
+    shell:
+        "mechane plan --manifest-path {input} --batch-size {BATCH_SIZE} --output {output} > /dev/null"
+
+
+rule run_task:  # stage 3: one job per task; finished instances are skipped, failures are reported
+    input:
+        PLAN,
+    output:
+        touch("done/task_{t}"),
+    resources:
+        runtime=10,  # minutes: `mechane stats --batch-size 5` suggests a value once instances ran
+    shell:
+        "mechane run-plan --plan-file {input} --task-id {wildcards.t}"
+
+
+def all_tasks(wildcards):
+    plan = json.load(open(checkpoints.make_plan.get().output[0]))
+    return expand("done/task_{t}", t=range(len(plan["tasks"])))
+
+
+rule complete:  # stage 4: a gate that asks mechane whether every instance is done
+    input:
+        all_tasks,
+    output:
+        touch("done/complete"),
+    shell:
+        "mechane status --manifest-path {MANIFEST} --check"
+
+
+rule export:  # stage 5: results as a table, one row per instance
+    input:
+        "done/complete",
+    output:
+        "results/table.csv",
+    shell:
+        "mechane export --manifest-path {MANIFEST} --output {output}"
+
+
+rule summarize:  # stage 6: your analysis
+    input:
+        "results/table.csv",
+        "summarize.py",
+    output:
+        "results/summary.txt",
+    shell:
+        "python summarize.py {input[0]} > {output}"
