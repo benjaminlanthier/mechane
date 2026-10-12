@@ -24,12 +24,14 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-          cache-dependency-glob: pyproject.toml
-      - run: uv sync
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - run: uv sync --locked
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pre-commit
-          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.pre-commit-config.yaml') }}
       - run: uv run pre-commit run --all-files --show-diff-on-failure
 
   test:
@@ -48,10 +50,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.13"
           enable-cache: true
-          cache-dependency-glob: pyproject.toml
-      - run: uv sync
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - run: uv sync --locked
       - run: uv run pytest -q
 
   # mechane is pure Python, so it has exactly ONE wheel (py3-none-any) that serves every OS and
