@@ -663,6 +663,35 @@ while other tasks finish.
 
 - `mechane plan --unfinished` plans only the instances that are missing or failed, so a new plan
   covers exactly what is left. `--experiment-id` and `--where` plan some experiments only.
+- A plan groups its tasks by experiment and writes each task's instances as a range, one batch
+  per line, so its size follows the number of tasks and not of instances: a million instances in
+  tasks of 1,000 is about 25 KB. Task `N` is the Nth batch in file order. A plan for two
+  experiments of 20 instances, in tasks of 10:
+
+  ```json
+  {
+    "version": 3,
+    "manifest_path": "/path/to/results/walks/manifest.json",
+    "batch_size": 10,
+    "num_tasks": 4,
+    "tasks": [
+      {"experiment_id": 0, "batches": [
+        "0-9",
+        "10-19"
+      ]},
+      {"experiment_id": 1, "batches": [
+        "0-9",
+        "10-19"
+      ]}
+    ]
+  }
+  ```
+
+  `num_tasks` is the total, which is what a script needs to count the tasks: `tasks` has one entry
+  per experiment, so `len(plan["tasks"])` is not the number of tasks. A Snakefile written for an
+  earlier version that counts tasks that way must read `plan["num_tasks"]` instead. `run-plan`
+  reads only its own task, and plan files from earlier versions (every instance id listed, or one
+  range per task) are still read.
 - A plan belongs to its manifest. It records experiment ids, and `run-plan` does not check that
   the manifest still numbers its experiments the same way. After editing `PARAMS` and re-running
   `setup`, make a new plan.
@@ -825,7 +854,7 @@ from mechane import (
 | `Config` | `hash_exclude`, `path_parts()`, `from_dict()` (inherits enum coercion; if you define `__post_init__`, call `super().__post_init__()`) |
 | `Configs` | One field per section, annotated with its `Config` class. Provides `names()`, `as_dict()`, `section_classes()` |
 | `ExperimentConfig` | Annotate `configs` with your `Configs` class. Holds `experiment_id`, `num_instances`, `seed`; provides `to_dict()`, `content_hash()` |
-| `Experiment` | Annotate `config` with your `ExperimentConfig` class. Set `seed_scheme`, override `summarize()`, `aggregate_instance_results()`; provides `stage_dir()`, `instances_dir`, `instance_dir(i)`, `instance_seed(i)`, `iter_results()`, `status()` |
+| `Experiment` | Annotate `config` with your `ExperimentConfig` class. Set `seed_scheme`, override `summarize()`, `aggregate_instance_results()`; provides `stage_dir()`, `instances_dir`, `instance_dir(i)`, `instance_seed(i)`, `present_instance_ids()`, `iter_results()`, `status()` |
 | `Instance` | `run()` (required); provides `self.experiment`, `self.instance_id`, `self.seed`, `self.rng`, `self.dir` |
 | `Laboratory` | `name`, `experiment_class`, `instance_class` (required); `sweep_order`, `track_packages`, `default_manifest_path()` (optional); provides `from_configs()`, `from_manifest()`, `setup()`, `aggregate_results()`, `section_classes()`, `experiment(i)`, `build_instance(e, i)` |
 | `load_laboratory(path)` | Rebuilds the right `Laboratory` subclass from a manifest alone |
@@ -903,9 +932,14 @@ likewise importable but not part of the top-level API.
 - Results are JSON; large numerical arrays should live in separate files you manage.
 - Every CLI invocation loads all experiment configs from the manifest. That is cheap for
   hundreds of experiments but adds startup cost for very large sweeps. The commands that look at
-  results read one file per instance: with 20,000 results on a local disk, `status` took about a
-  second and `aggregate` about two. `doctor`, `stats` and `export` read every file too, and none of
-  this has been measured on a parallel filesystem, where it will be slower.
+  instances list each experiment's `instances/` directory once and only examine the instances that
+  have a directory, so an experiment of a million instances that has barely started costs
+  well under a second. Reading finished results costs one file each: with 20,000 results on a local
+  disk, `status` took 0.3 s, `aggregate` and `export` 0.6 s, and `doctor` 1 s. None of this has
+  been measured on a parallel filesystem, where it will be slower.
+- **One instance is one directory and one `results.json`**, so a million instances is about two
+  million files per experiment, which many clusters limit. If your instances are tiny, make each
+  one do more work (draw many samples inside `run()`) instead of running millions of them.
 - Configuration hashes cover parameters, not code. Version your configs when logic changes;
   `doctor` reports results that were produced by more than one recorded code version.
 
@@ -989,7 +1023,7 @@ src/mechane/
     ranges.py          compact_ranges / parse_ranges: `0-2,5,7-8`
     seeding.py         mix31 and the derived / legacy seed schemes
     provenance.py      allow-listed run metadata
-    io.py              atomic JSON writes
+    io.py              atomic JSON and text writes
   cli/                 click commands: thin wrappers over core
     __init__.py        the `mechane` command group
     _options.py        click options shared by several commands, including the selection
@@ -1010,6 +1044,7 @@ tests/
   test_utils.py        serialization, sweeps, ranges, provenance
   test_cli.py          the command line: entry point, params files, run-batch, wording, formatting
   test_cli_commands.py the newer commands through the command line
+  test_scan.py         finding instances on disk from one directory listing, as before but faster
   test_selection.py, test_plan.py, test_errors.py, test_doctor.py, test_stats.py,
   test_listing.py, test_replay.py, test_export.py, test_clean.py, test_scaffold.py
                        the logic of each newer command, in `core`
