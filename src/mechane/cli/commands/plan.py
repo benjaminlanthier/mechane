@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import click
@@ -8,7 +7,7 @@ import click
 from mechane.cli._options import MANIFEST_PATH, selected, selection_options
 from mechane.cli._output import format_plan
 from mechane.core.manifest import load_laboratory
-from mechane.core.plan import build_plan, plan_to_dict, write_plan
+from mechane.core.plan import build_plan, plan_to_json, write_plan
 
 
 @click.command("plan")
@@ -60,6 +59,6 @@ def plan(
     if output is not None:
         write_plan(the_plan, output)
     if fmt == "json":
-        click.echo(json.dumps(plan_to_dict(the_plan), indent=2))
+        click.echo(plan_to_json(the_plan), nl=False)
     else:
         click.echo(format_plan(the_plan))

@@ -4,6 +4,7 @@ seeds, and reading their results back. It does not run anything: see `mechane.co
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterator
 from functools import cached_property
 from pathlib import Path
@@ -15,6 +16,8 @@ from mechane.utils.seeding import derived_base, derived_seed, legacy_seed
 
 class Experiment:
     seed_scheme: ClassVar[Literal["derived", "legacy"]] = "derived"
+    RESULTS_FILE: ClassVar[str] = "results.json"  # what an instance leaves when it finishes
+    ERROR_FILE: ClassVar[str] = "job.err"  # what it leaves when it raises
     config: ExperimentConfig  # subclasses narrow this; `config_class()` reads it back
 
     @classmethod
@@ -33,8 +36,9 @@ class Experiment:
                 return path
         raise KeyError(f"No section {section!r}; configs are {list(self.config.configs.names())}")
 
-    @property
+    @cached_property
     def instances_dir(self) -> Path:
+        # Computed once: it hashes every section, and almost everything else is built from it.
         names = self.config.configs.names()
         base = self.stage_dir(names[-1]) if names else self.root
         return base / "instances"
@@ -63,27 +67,58 @@ class Experiment:
 
     # ---- results & aggregation -------------------------------------------------------------
     def results_path(self, instance_id: int) -> Path:
-        return self.instance_dir(instance_id) / "results.json"
+        return self.instance_dir(instance_id) / self.RESULTS_FILE
 
     def error_path(self, instance_id: int) -> Path:
-        return self.instance_dir(instance_id) / "job.err"
+        return self.instance_dir(instance_id) / self.ERROR_FILE
+
+    def present_instance_ids(self) -> list[int]:
+        """The ids below `num_instances` that have a directory under `instances/`, ascending.
+
+        One directory listing, not one probe per instance: with a million instances of which a
+        thousand have run, looking at the instances costs a thousand probes, not a million. A
+        directory counts only if it is named the way `instance_dir` names it (so a stray
+        `instances/5` next to `instances/05`, or a file called `07`, is not an instance).
+        """
+        width, n = self.pad_length, self.config.num_instances
+        ids: list[int] = []
+        try:
+            with os.scandir(self.instances_dir) as entries:
+                for entry in entries:
+                    name = entry.name
+                    is_instance_name = len(name) == width and name.isascii() and name.isdigit()
+                    if is_instance_name and int(name) < n and entry.is_dir():
+                        ids.append(int(name))
+        except (FileNotFoundError, NotADirectoryError):
+            return []
+        ids.sort()
+        return ids
 
     def iter_results(self) -> Iterator[tuple[int, dict[str, Any]]]:
-        for i in range(self.config.num_instances):
-            path = self.results_path(i)
-            if path.exists():
-                with path.open() as f:
-                    yield i, json.load(f)
+        base, width = os.fspath(self.instances_dir), self.pad_length
+        for i in self.present_instance_ids():
+            try:
+                with open(
+                    os.path.join(base, f"{i:0{width}d}", self.RESULTS_FILE), encoding="utf-8"
+                ) as f:
+                    record = json.load(f)
+            except FileNotFoundError:  # the directory exists, the instance has not finished
+                continue
+            yield i, record
 
     def status(self) -> dict[str, list[int]]:
-        done, failed, missing = [], [], []
-        for i in range(self.config.num_instances):
-            if self.results_path(i).exists():
+        base, width = os.fspath(self.instances_dir), self.pad_length
+        done: list[int] = []
+        failed: list[int] = []
+        for i in self.present_instance_ids():
+            directory = os.path.join(base, f"{i:0{width}d}")
+            if os.path.exists(os.path.join(directory, self.RESULTS_FILE)):
                 done.append(i)
-            elif self.error_path(i).exists():
+            elif os.path.exists(os.path.join(directory, self.ERROR_FILE)):
                 failed.append(i)
-            else:
-                missing.append(i)
+        seen = set(done)
+        seen.update(failed)
+        missing = [i for i in range(self.config.num_instances) if i not in seen]
         return {"done": done, "failed": failed, "missing": missing}
 
     def summarize(self, result: dict[str, Any]) -> Any:

@@ -47,7 +47,8 @@ def find_targets(
                 )
                 targets += [CleanTarget(kind, eid, i, path) for i, path in stray]
             continue
-        wanted = range(n) if instance_ids is None else [i for i in instance_ids if 0 <= i < n]
+        present = exp.present_instance_ids()
+        wanted = present if instance_ids is None else [i for i in instance_ids if i in present]
         for i in wanted:
             if kind == "results" and exp.results_path(i).exists():
                 targets.append(CleanTarget(kind, eid, i, exp.results_path(i)))
