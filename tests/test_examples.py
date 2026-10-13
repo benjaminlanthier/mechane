@@ -18,6 +18,7 @@ from click.testing import CliRunner
 
 from mechane.cli import export, main
 from mechane.core.params import load_params_file
+from mechane.core.plan import build_plan, plan_to_dict
 from mechane.core.runner import run_batch
 
 EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "snakemake"
@@ -87,3 +88,17 @@ def test_the_snakefile_calls_only_mechane_commands_and_options_that_exist():
         }
         for flag in re.findall(r"--[a-z][a-z-]*", arguments):
             assert flag in known, f"`mechane {name}` has no option {flag}"
+
+
+def test_the_snakefile_counts_tasks_with_num_tasks_and_reads_only_keys_a_plan_has(example):
+    snakefile = (example / "Snakefile").read_text()
+    lab = load_params_file(Path("params.py")).build_laboratory()
+    plan = plan_to_dict(build_plan(lab, 5))
+
+    keys = set(re.findall(r'plan\["(\w+)"\]', snakefile))
+
+    assert "num_tasks" in keys
+    assert keys <= plan.keys()
+    # `tasks` is grouped by experiment, so its length is the number of groups, not of tasks.
+    assert 'len(plan["tasks"])' not in snakefile
+    assert plan["num_tasks"] == 24 and len(plan["tasks"]) == 6

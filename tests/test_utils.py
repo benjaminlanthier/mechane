@@ -13,6 +13,7 @@ import pytest
 
 from mechane import expand, grid, to_jsonable, zipped
 from mechane.utils import provenance
+from mechane.utils.io import atomic_write_json, atomic_write_text
 from mechane.utils.ranges import compact_ranges, parse_ranges
 from mechane.utils.serialization import flatten
 from toy import Kind
@@ -32,7 +33,7 @@ def test_to_jsonable_converts_every_supported_type():
         "tuple": (1, 2),
         "set": {3, 1, 2},
         "frozenset": frozenset({"b", "a"}),
-        "path": str(Path("a") / Path("b")),
+        "path": Path("a/b"),
         "array": np.arange(3),
         "scalar": np.float32(0.5),
         "none": None,
@@ -43,7 +44,7 @@ def test_to_jsonable_converts_every_supported_type():
         "tuple": [1, 2],
         "set": [1, 2, 3],  # sets are sorted so the output is deterministic
         "frozenset": ["a", "b"],
-        "path": str(Path("a") / Path("b")),
+        "path": "a/b",
         "array": [0, 1, 2],
         "scalar": 0.5,
         "none": None,
@@ -241,3 +242,30 @@ def test_flatten_leaves_lists_and_empty_mappings_alone():
 
 def test_flatten_accepts_a_prefix():
     assert flatten({"b": {"c": 1}}, "a.") == {"a.b.c": 1}
+
+
+# --------------------------------------------------------------------------- atomic writes
+def test_atomic_write_text_creates_parents_and_leaves_no_temporary_file(tmp_path):
+    target = tmp_path / "a" / "b" / "file.txt"
+
+    atomic_write_text(target, "h\u00e9llo\n")
+
+    assert target.read_text(encoding="utf-8") == "h\u00e9llo\n"
+    assert [p.name for p in target.parent.iterdir()] == ["file.txt"]
+
+
+def test_atomic_writes_replace_the_old_content_and_keep_it_if_they_fail(tmp_path, monkeypatch):
+    target = tmp_path / "file.json"
+    atomic_write_json(target, {"v": 1})
+    atomic_write_text(target, "second")
+    assert target.read_text() == "second"
+
+    def failing_replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("os.replace", failing_replace)
+    with pytest.raises(OSError, match="disk full"):
+        atomic_write_text(target, "third")
+
+    assert target.read_text() == "second"  # the old content survives
+    assert [p.name for p in tmp_path.iterdir()] == ["file.json"]  # and no temp file is left

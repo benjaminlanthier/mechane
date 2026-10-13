@@ -165,16 +165,12 @@ def test_run_batch_fail_fast_stops_at_the_first_error(tmp_path):
     ("event", "stream", "line"),
     [
         (
-            InstanceSkipped(Path("r") / Path("/results.json")),
+            InstanceSkipped(Path("/r/results.json")),
             "out",
-            f"[Job] {Path('r') / Path('/results.json')} already exists, skipping.",
+            "[Job] /r/results.json already exists, skipping.",
         ),
         (InstanceStarted("toy", 1, 2), "out", "[Job] lab=toy experiment_id=1 instance_id=2"),
-        (
-            InstanceSaved(Path("r") / Path("/results.json")),
-            "out",
-            f"[Save] {Path('r') / Path('/results.json')}",
-        ),
+        (InstanceSaved(Path("/r/results.json")), "out", "[Save] /r/results.json"),
         (
             InstanceFailed(3, ValueError("boom")),
             "err",
