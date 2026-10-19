@@ -192,10 +192,10 @@ def test_run_batch_fail_fast_stops_at_the_first_error(tmp_path):
         (
             InstanceSkipped(Path("r") / "results.json"),
             "out",
-            "[Job] /r/results.json already exists, skipping.",
+            "[Job] r/results.json already exists, skipping.",
         ),
         (InstanceStarted("toy", 1, 2), "out", "[Job] lab=toy experiment_id=1 instance_id=2"),
-        (InstanceSaved(Path("/r/results.json")), "out", "[Save] /r/results.json"),
+        (InstanceSaved(Path("r") / "results.json"), "out", "[Save] r/results.json"),
         (
             InstanceFailed(3, ValueError("boom")),
             "err",
