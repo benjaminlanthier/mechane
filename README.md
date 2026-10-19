@@ -323,9 +323,9 @@ one to one:
 
 ```python
 PARAMS = {
-    "zip": [("concatenated_code", "circuit")],  # paired, not crossed
-    "concatenated_code": grid(num_subsystems=[3, 5, 7, 9]),
-    "circuit": grid(num_repeats=[3, 5, 7, 9]),
+    "zip": [("a", "b")],  # paired, not crossed
+    "a": grid(param_a=[3, 5, 7, 9]),
+    "b": grid(param_b=[3, 5, 7, 9]),
 }
 ```
 
