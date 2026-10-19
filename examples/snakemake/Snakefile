@@ -79,4 +79,3 @@ rule summarize:  # stage 6: your analysis
         OUTPUT_PATH / "summary.txt",
     shell:
         "python summarize.py {input} > {output}"
-
