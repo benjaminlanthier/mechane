@@ -14,7 +14,7 @@ from pathlib import Path
 DEFAULT_SECTIONS = ("model", "solver")
 
 #: Names a section may not take: top-level keys of the parameter dict and manifest ...
-RESERVED_SECTION_NAMES = frozenset({"experiment_id", "num_instances", "seed", "configs"})
+RESERVED_SECTION_NAMES = frozenset({"experiment_id", "num_instances", "seed", "configs", "zip"})
 #: ... and the names the generated module imports from mechane, which a section class must not
 #: shadow.
 MECHANE_NAMES = frozenset(

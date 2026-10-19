@@ -272,9 +272,9 @@ Rules:
 - Define the classes at module level. The lab must be importable by reference anyway so that jobs
   can find it.
 - Every field of your `Configs` subclass must be annotated with a `Config` subclass.
-- Section names cannot be `experiment_id`, `num_instances`, `seed` or `configs`: the first three
-  are top-level keys of the parameter dict and of the manifest, and `configs` is the attribute
-  that holds the sections.
+- Section names cannot be `experiment_id`, `num_instances`, `seed`, `zip` or `configs`: the first
+  four are top-level keys of the parameter dict (and, for the first three, of the manifest), and
+  `configs` is the attribute that holds the sections.
 - Annotate `experiment: WalkExperiment` in your `Instance` subclass so that
   `self.experiment.config` is fully typed.
 
@@ -299,6 +299,7 @@ parameters (per-qubit rates, coefficient lists) are never mistaken for sweeps.
 | `s1 * s2` | Product of two sweeps (keys must be disjoint) | `len(s1) · len(s2)` |
 | `s1 + s2` | Concatenation | `len(s1) + len(s2)` |
 | `{"name": "x", "params": zipped(n=[1, 2])}` | Sweeps may be nested inside dicts | 2 |
+| `"zip": [("a", "b")]` | Sections `a` and `b` are paired, not crossed (see below) | `len` of either |
 
 Example: a method and its options that must stay paired, crossed with an independent axis:
 
@@ -314,6 +315,26 @@ stable when porting an existing lab.
 
 `Laboratory.from_configs` rejects unknown top-level keys, so a typo such as `"modle"` fails loudly
 instead of silently producing a one-point sweep.
+
+**Pairing whole sections.** Sections are combined as a Cartesian product, so two parameters in
+different sections cannot be paired with `zipped`. To pair two sections' sweeps instead of
+crossing them, list them in `zip`. Each section keeps its own sweep, and their points are matched
+one to one:
+
+```python
+PARAMS = {
+    "zip": [("concatenated_code", "circuit")],  # paired, not crossed
+    "concatenated_code": grid(num_subsystems=[3, 5, 7, 9]),
+    "circuit": grid(num_repeats=[3, 5, 7, 9]),
+}
+```
+
+This is 4 experiments (without `zip` it would be 16): point `i` of one section goes with point `i`
+of the other, whole points at a time, so a section may sweep several fields. The sections of a
+group must expand to the same number of points. A group counts as one dimension of the product,
+placed where its first member is in `sweep_order`, so it can still be crossed with the other
+sections or with another group (`"zip": [("a", "b"), ("c", "d")]`); a single group may be written
+flat (`"zip": ("a", "b")`).
 
 ## How results are organized
 
@@ -952,12 +973,13 @@ likewise importable but not part of the top-level API.
 | `Experiments N and M map to the same directory` | They differ only in `hash_exclude` fields, or the sweep repeats a point. Remove the duplicate or make the differing field part of the hash. |
 | `Unknown configs keys […]` | A top-level key in `PARAMS` is not `seed`, `num_instances` or a section name. Check for a typo. |
 | `zipped() axes must have equal lengths` | Paired axes need the same length; use `grid` (or `*`) for independent axes. |
+| `ValueError: zipped sections must expand to the same number of points, got {…}` | The sections listed together in `zip` sweep different numbers of points. Their sweeps must have the same length. |
 | `instance_id N is out of range for experiment E` | Raised by `replay`. `run` and `run-batch` do **not** check, so a batch that overshoots the end silently creates extra results: `mechane doctor` reports them and `mechane clean --what stray --yes` removes them. Cap the last batch in a hand-written script, or use `plan` and `run-plan`. |
 | `KeyError: No experiment N; valid ids: 0..K` (or `Error: No experiment N …` from commands with a selection) | The experiment id is not in the manifest. After changing `PARAMS`, run `mechane setup` again, and see the renumbering note under limitations. |
 | `status` shows everything missing, or `aggregate` reports no finished instances, although results exist | The manifest's `ROOT` is relative and you are in another directory. `cd` back to where you ran `setup`, or use an absolute `ROOT` and run `setup` again. `mechane doctor` warns about a relative root. |
 | `TypeError: … declares no sections` | The lab still uses the base classes. Subclass `Configs`, annotate `ExperimentConfig.configs` with it, annotate `Experiment.config` with your `ExperimentConfig` subclass, and set `experiment_class` on the lab. |
 | `TypeError: … must be annotated with a Config subclass` | A field of your `Configs` class has a type that is not a `Config` subclass. |
-| `ValueError: Config names […] are reserved` | A section is named `experiment_id`, `num_instances`, `seed` or `configs`. Rename it. |
+| `ValueError: Config names […] are reserved` | A section is named `experiment_id`, `num_instances`, `seed`, `zip` or `configs`. Rename it. |
 | `ValueError: […] is not a valid Kind` (or your enum's name) when building a `Config` | An enum inside a generic (`list[Kind]`) is not coerced. Keep the values as plain strings. |
 | `NameError: name '…' is not defined` when the lab is first used | Your classes are defined inside a function and the file uses `from __future__ import annotations`. Define them at module level. |
 | A type checker reports `Object of type Config has no attribute …` | You used the `config.<section>` shortcut. Use the typed path `config.configs.<section>`. |
@@ -1045,6 +1067,7 @@ tests/
   test_cli.py          the command line: entry point, params files, run-batch, wording, formatting
   test_cli_commands.py the newer commands through the command line
   test_scan.py         finding instances on disk from one directory listing, as before but faster
+  test_zip.py          `zip`: sections paired element by element instead of crossed
   test_selection.py, test_plan.py, test_errors.py, test_doctor.py, test_stats.py,
   test_listing.py, test_replay.py, test_export.py, test_clean.py, test_scaffold.py
                        the logic of each newer command, in `core`

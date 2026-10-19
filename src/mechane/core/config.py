@@ -80,7 +80,7 @@ class Config:
         return cls(**data)  # type: ignore[call-arg]
 
 
-RESERVED = frozenset({"experiment_id", "num_instances", "seed", "configs"})
+RESERVED = frozenset({"experiment_id", "num_instances", "seed", "configs", "zip"})
 
 
 @dataclasses.dataclass(frozen=True)
