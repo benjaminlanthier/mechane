@@ -190,7 +190,7 @@ def test_run_batch_fail_fast_stops_at_the_first_error(tmp_path):
     ("event", "stream", "line"),
     [
         (
-            InstanceSkipped(Path("/r/results.json")),
+            InstanceSkipped(Path("r") / "results.json"),
             "out",
             "[Job] /r/results.json already exists, skipping.",
         ),
