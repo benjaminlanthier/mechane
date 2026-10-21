@@ -1,6 +1,6 @@
 [project]
 name = "mechane"            # placeholder name: check availability before publishing
-version = "0.1.1"
+version = "0.2.0"
 description = "Managing Experiments, Configurations, Hashes And Numerical Executions."
 requires-python = ">=3.13"
 dependencies = ["click>=8.1", "numpy>=1.26"]
