@@ -33,7 +33,7 @@ def test_to_jsonable_converts_every_supported_type():
         "tuple": (1, 2),
         "set": {3, 1, 2},
         "frozenset": frozenset({"b", "a"}),
-        "path": Path("a/b"),
+        "path": Path("a") / "b",
         "array": np.arange(3),
         "scalar": np.float32(0.5),
         "none": None,
@@ -44,7 +44,7 @@ def test_to_jsonable_converts_every_supported_type():
         "tuple": [1, 2],
         "set": [1, 2, 3],  # sets are sorted so the output is deterministic
         "frozenset": ["a", "b"],
-        "path": "a/b",
+        "path": str(Path("a") / "b"),
         "array": [0, 1, 2],
         "scalar": 0.5,
         "none": None,
