@@ -14,7 +14,7 @@ from mechane.core.manifest import read_manifest
 from mechane.core.registry import laboratory_ref, resolve_laboratory
 from mechane.utils.io import atomic_write_json
 from mechane.utils.provenance import collect_provenance
-from mechane.utils.sweep import expand
+from mechane.utils.sweep import expand, zip_dimensions, zip_groups
 
 
 class Laboratory:
@@ -81,7 +81,7 @@ class Laboratory:
     def from_configs(cls, root: Path, configs: dict[str, Any]) -> Laboratory:
         """Build from a configs dict: {"seed": ..., "num_instances": ..., <section>: spec, ...}."""
         sections = cls.section_classes()
-        allowed = {"seed", "num_instances", *sections}
+        allowed = {"seed", "num_instances", "zip", *sections}
         unknown = set(configs) - allowed
         if unknown:
             raise ValueError(
@@ -98,10 +98,19 @@ class Laboratory:
             name: [sections[name].from_dict(p) for p in expand(configs.get(name, {}))]
             for name in order
         }
+        dimensions = zip_dimensions(order, zip_groups(configs.get("zip", ()), sections))
+        for group in dimensions:
+            sizes = {name: len(axes[name]) for name in group}
+            if len(set(sizes.values())) > 1:
+                raise ValueError(
+                    f"zipped sections must expand to the same number of points, got {sizes}"
+                )
         config_cls, configs_cls = cls.experiment_config_class(), cls.configs_class()
         experiments = []
-        for experiment_id, combo in enumerate(product(*(axes[n] for n in order))):
-            chosen = dict(zip(order, combo, strict=True))
+        picks = product(*(range(len(axes[group[0]])) for group in dimensions))
+        for experiment_id, picked in enumerate(picks):
+            index = {name: i for group, i in zip(dimensions, picked, strict=True) for name in group}
+            chosen = {name: axes[name][index[name]] for name in order}
             config = config_cls(
                 experiment_id=experiment_id,
                 num_instances=num_instances,

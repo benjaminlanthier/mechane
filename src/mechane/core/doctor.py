@@ -102,7 +102,7 @@ def _check_experiment(exp: Experiment) -> list[Finding]:
     stale: list[int] = []
     versions: dict[str, list[int]] = {}
 
-    for i in range(n):
+    for i in exp.present_instance_ids():
         results = exp.results_path(i)
         if not results.exists():
             continue

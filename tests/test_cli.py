@@ -95,6 +95,31 @@ def test_setup_accepts_an_entry_point_name(tmp_path, register_laboratory):
     assert json.loads(manifest.read_text())["laboratory"] == "toy:ToyLab"
 
 
+def test_setup_pairs_the_sections_listed_in_zip(tmp_path):
+    params = tmp_path / "params.py"
+    params.write_text(
+        "from pathlib import Path\n"
+        "from mechane import grid\n"
+        f"ROOT = Path({str(tmp_path / 'out')!r})\n"
+        "LABORATORY = 'toy:ToyLab'\n"
+        "PARAMS = {'num_instances': 1, 'zip': [('model', 'solver')],\n"
+        "          'model': grid(L=[2, 3, 4]),\n"
+        "          'solver': grid({'sigma': 1.0}, n_samples=[10, 20, 30])}\n"
+    )
+
+    result = CliRunner().invoke(setup_lab, ["--params-file", str(params)])
+
+    assert result.exit_code == 0, result.output
+    assert "[Setup] 3 experiments x 1 instances" in result.output  # not 9
+    lab = ToyLab.from_manifest(tmp_path / "out" / "manifest.json")
+    values = [e.config.to_dict() for e in lab.experiments]
+    assert [(v["model"]["L"], v["solver"]["n_samples"]) for v in values] == [
+        (2, 10),
+        (3, 20),
+        (4, 30),
+    ]
+
+
 def test_setup_requires_a_laboratory(tmp_path):
     params = write_params(tmp_path, header="")
     result = CliRunner().invoke(setup_lab, ["--params-file", str(params)])
@@ -165,16 +190,12 @@ def test_run_batch_fail_fast_stops_at_the_first_error(tmp_path):
     ("event", "stream", "line"),
     [
         (
-            InstanceSkipped(Path("r") / Path("/results.json")),
+            InstanceSkipped(Path("r") / "results.json"),
             "out",
-            f"[Job] {Path('r') / Path('/results.json')} already exists, skipping.",
+            f"[Job] {Path('r') / 'results.json'} already exists, skipping.",
         ),
         (InstanceStarted("toy", 1, 2), "out", "[Job] lab=toy experiment_id=1 instance_id=2"),
-        (
-            InstanceSaved(Path("r") / Path("/results.json")),
-            "out",
-            f"[Save] {Path('r') / Path('/results.json')}",
-        ),
+        (InstanceSaved(Path("r") / "results.json"), "out", f"[Save] {Path('r') / 'results.json'}"),
         (
             InstanceFailed(3, ValueError("boom")),
             "err",

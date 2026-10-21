@@ -7,7 +7,7 @@ import click
 from mechane.cli._options import OVERWRITE
 from mechane.cli._output import echo_event, finish_batch
 from mechane.core.manifest import load_laboratory
-from mechane.core.plan import PlanError, read_plan
+from mechane.core.plan import PlanError, read_task
 from mechane.core.runner import run_batch
 
 
@@ -29,11 +29,10 @@ from mechane.core.runner import run_batch
 def run_plan(plan_file: Path, task_id: int, overwrite: bool, continue_on_error: bool) -> None:
     """Run one task of a plan: a batch of instances of one experiment."""
     try:
-        the_plan = read_plan(plan_file)
-        task = the_plan.task(task_id)
+        manifest_path, task = read_task(plan_file, task_id)
     except PlanError as exc:
         raise click.UsageError(str(exc)) from exc
-    lab = load_laboratory(the_plan.manifest_path)
+    lab = load_laboratory(manifest_path)
     result = run_batch(
         lab,
         task.experiment_id,

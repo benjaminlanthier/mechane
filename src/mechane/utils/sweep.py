@@ -8,13 +8,16 @@ Nothing is inferred from types: a list is a literal value unless it is passed as
     a * b                                               # product of two sweeps
     a + b                                               # concatenation
     {"name": "x", "params": zipped(...)}                # sweeps may be nested in dicts
+
+Across sections the experiments are the Cartesian product of each section's points, unless some
+sections are listed in `zip`, which pairs them element by element (`zip_groups`).
 """
 
 from __future__ import annotations
 
 import copy
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from itertools import product
 from typing import Any
 
@@ -118,3 +121,51 @@ class _Chain(Sweep):
 
     def points(self) -> list[dict[str, Any]]:
         return expand(self.a) + expand(self.b)
+
+
+def zip_groups(spec: Any, sections: Iterable[str]) -> list[tuple[str, ...]]:
+    """The groups of sections to pair element by element, from the `zip` entry of the params:
+    `[("code", "circuit")]`, or `("code", "circuit")` for a single group."""
+    known = set(sections)
+    if isinstance(spec, str | bytes):  # "code" would otherwise read as the sections "c", "o", ...
+        raise ValueError(f"zip must list groups of section names, got {spec!r}")
+    try:
+        items = list(spec)
+    except TypeError:
+        raise ValueError(f"zip must list groups of section names, got {spec!r}") from None
+    if items and all(isinstance(item, str) for item in items):
+        items = [items]  # a single group, written flat
+    groups: list[tuple[str, ...]] = []
+    placed: set[str] = set()
+    for item in items:
+        if isinstance(item, str) or not isinstance(item, Iterable):
+            raise ValueError(f"zip must list groups of section names, got {item!r}")
+        names = tuple(item)
+        if not all(isinstance(name, str) for name in names):
+            raise ValueError(f"zip must list groups of section names, got {item!r}")
+        if len(names) < 2:
+            raise ValueError(f"a zip group needs at least two sections, got {names!r}")
+        for name in names:
+            if name not in known:
+                raise ValueError(
+                    f"zip names an unknown section {name!r}; sections are {sorted(known)}"
+                )
+            if name in placed:
+                raise ValueError(f"section {name!r} appears more than once in zip")
+            placed.add(name)
+        groups.append(names)
+    return groups
+
+
+def zip_dimensions(order: Sequence[str], groups: Sequence[Sequence[str]]) -> list[tuple[str, ...]]:
+    """The dimensions of the experiments' product: each section alone, or each zip group as one
+    dimension. A group takes the place of its first member in `order`."""
+    member_of = {name: tuple(group) for group in groups for name in group}
+    dimensions: list[tuple[str, ...]] = []
+    placed: set[str] = set()
+    for name in order:
+        if name not in placed:
+            group = member_of.get(name, (name,))
+            dimensions.append(group)
+            placed.update(group)
+    return dimensions

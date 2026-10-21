@@ -1,11 +1,13 @@
 # Snakemake decides the order of the stages; mechane decides what each stage runs and where the
 # results go. Run it with:   snakemake -c4
 import json
+from pathlib import Path
 
-OUTPUT_PATH = "outputs"
-LAB_NAME = "decay"
-MANIFEST_PATH = f"{OUTPUT_PATH}/{LAB_NAME}"
-MANIFEST = f"{MANIFEST_PATH}/manifest.json"  # ROOT in params.py, plus manifest.json
+OUTPUT_PATH = Path("outputs")
+LAB_NAME = Path("decay")
+PARAMS_FILE = "params.py"
+MANIFEST_PATH = OUTPUT_PATH / LAB_NAME
+MANIFEST = MANIFEST_PATH / "manifest.json"  # ROOT in params.py, plus manifest.json
 PLAN = "plan.json"
 BATCH_SIZE = 5  # instances per Snakemake job: one job per mechane task, not one per instance
 
@@ -19,12 +21,11 @@ rule all:
 
 rule setup:  # stage 1: expand the sweep and write the manifest
     input:
-        "params.py",
-        "decay.py",
+        PARAMS_FILE,
     output:
         MANIFEST,
     shell:
-        "mechane setup --params-file {input[0]}"
+        "mechane setup --params-file {input}"
 
 
 checkpoint make_plan:  # stage 2: split the work into tasks (known only once the manifest exists)
@@ -40,7 +41,7 @@ rule run_task:  # stage 3: one job per task; finished instances are skipped, fai
     input:
         PLAN,
     output:
-        touch("done/task_{t}"),
+        touch(Path("done") / Path("task_{t}")),
     resources:
         runtime=10,  # minutes: `mechane stats --batch-size 5` suggests a value once instances ran
     shell:
@@ -49,32 +50,32 @@ rule run_task:  # stage 3: one job per task; finished instances are skipped, fai
 
 def all_tasks(wildcards):
     plan = json.load(open(checkpoints.make_plan.get().output[0]))
-    return expand("done/task_{t}", t=range(len(plan["tasks"])))
+    # `num_tasks` counts the tasks; `tasks` is grouped by experiment, so len() would count those
+    return expand("done/task_{t}", t=range(plan["num_tasks"]))
 
 
 rule complete:  # stage 4: a gate that asks mechane whether every instance is done
     input:
         all_tasks,
     output:
-        touch("done/complete"),
+        touch(Path("done") / "complete"),
     shell:
         "mechane status --manifest-path {MANIFEST} --check"
 
 
 rule export:  # stage 5: results as a table, one row per instance
     input:
-        "done/complete",
+        Path("done") / "complete",
     output:
-        f"{OUTPUT_PATH}/table.csv",
+        OUTPUT_PATH / "table.csv",
     shell:
         "mechane export --manifest-path {MANIFEST} --output {output}"
 
 
 rule summarize:  # stage 6: your analysis
     input:
-        f"{OUTPUT_PATH}/table.csv",
-        "summarize.py",
+        OUTPUT_PATH / "table.csv",
     output:
-        f"{OUTPUT_PATH}/summary.txt",
+        OUTPUT_PATH / "summary.txt",
     shell:
-        "python summarize.py {input[0]} > {output}"
+        "python summarize.py {input} > {output}"

@@ -82,6 +82,8 @@ def test_plan_has_no_scheduler_specific_format(lab):
 def test_plan_json_format_is_the_plan_file_format(lab):
     result = invoke(plan, *with_manifest(lab, "--batch-size", 4, "--format", "json"))
     assert json.loads(result.stdout) == plan_to_dict(build_plan(lab, 4))
+    assert '"num_tasks": 4' in result.stdout
+    assert '{"experiment_id": 0, "batches": [\n      "0-3",\n      "4-5"\n    ]}' in result.stdout
 
 
 def test_a_saved_plan_is_what_run_plan_runs(lab, tmp_path):
@@ -100,17 +102,20 @@ def test_a_saved_plan_is_what_run_plan_runs(lab, tmp_path):
 
 
 def test_plan_unfinished_covers_only_what_is_left(lab, run_instances):
-    def tasks():
+    def plan_json():
         result = invoke(
             plan, *with_manifest(lab, "--batch-size", 4, "--unfinished", "--format", "json")
         )
-        return json.loads(result.stdout)["tasks"]
+        return json.loads(result.stdout)
 
     run_instances(lab, 0, range(6))
-    assert [t["experiment_id"] for t in tasks()] == [1, 1]  # only experiment 1, in two tasks
+    only_experiment_1 = plan_json()
+    assert only_experiment_1["num_tasks"] == 2  # two tasks, in one group
+    assert [g["experiment_id"] for g in only_experiment_1["tasks"]] == [1]
+    assert only_experiment_1["tasks"][0]["batches"] == ["0-3", "4-5"]
 
     run_instances(lab, 1, range(6))
-    assert tasks() == []
+    assert plan_json()["num_tasks"] == 0
     result = invoke(plan, *with_manifest(lab, "--unfinished"))
     assert "Nothing to run: the plan has no tasks." in result.stdout
 
@@ -165,6 +170,85 @@ def test_run_plan_skips_finished_work_unless_told_to_overwrite(lab, run_instance
     assert overwritten.stdout.count("[Save]") == 6
 
 
+def test_run_plan_still_runs_a_version_1_plan(lab, tmp_path):
+    plan_file = tmp_path / "plan.json"
+    plan_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "manifest_path": str(lab.manifest_path),
+                "batch_size": 3,
+                "tasks": [{"experiment_id": 1, "instance_ids": [0, 2, 4]}],
+            }
+        )
+    )
+
+    result = invoke(run_plan, "--plan-file", plan_file, "--task-id", 0)
+
+    assert result.exit_code == 0, result.output
+    assert lab.experiment(1).status()["done"] == [0, 2, 4]
+
+
+def test_run_plan_runs_a_task_of_a_version_2_plan(lab, tmp_path):
+    plan_file = tmp_path / "plan.json"
+    plan_file.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "manifest_path": str(lab.manifest_path),
+                "batch_size": 2,
+                "tasks": [{"experiment_id": 1, "instances": "3-5"}],
+            }
+        )
+    )
+
+    assert invoke(run_plan, "--plan-file", plan_file, "--task-id", 0).exit_code == 0
+    assert lab.experiment(1).status()["done"] == [3, 4, 5]
+
+
+def test_run_plan_reads_only_its_own_task(lab, tmp_path):
+    plan_file = tmp_path / "plan.json"
+    plan_file.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "manifest_path": str(lab.manifest_path),
+                "batch_size": 2,
+                "num_tasks": 3,
+                "tasks": [
+                    {"experiment_id": 0, "batches": ["0-1"]},
+                    {"experiment_id": 1, "batches": ["garbage", "0-1"]},
+                ],
+            }
+        )
+    )
+    assert invoke(run_plan, "--plan-file", plan_file, "--task-id", 0).exit_code == 0
+    assert invoke(run_plan, "--plan-file", plan_file, "--task-id", 2).exit_code == 0
+    broken = invoke(run_plan, "--plan-file", plan_file, "--task-id", 1)
+    assert broken.exit_code == 2 and "is a malformed plan" in broken.stderr
+
+
+def test_run_plan_reads_only_its_own_task_in_a_flat_plan(lab, tmp_path):
+    plan_file = tmp_path / "plan.json"
+    plan_file.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "manifest_path": str(lab.manifest_path),
+                "batch_size": 2,
+                "tasks": [
+                    {"experiment_id": 0, "instances": "0-1"},
+                    {"experiment_id": 0, "instances": "garbage"},
+                ],
+            }
+        )
+    )
+
+    assert invoke(run_plan, "--plan-file", plan_file, "--task-id", 0).exit_code == 0
+    broken = invoke(run_plan, "--plan-file", plan_file, "--task-id", 1)
+    assert broken.exit_code == 2 and "is a malformed plan" in broken.stderr
+
+
 def test_run_plan_rejects_a_task_that_is_not_in_the_plan(lab, tmp_path):
     plan_file = tmp_path / "plan.json"
     write_plan(build_plan(lab, 6), plan_file)
@@ -173,6 +257,7 @@ def test_run_plan_rejects_a_task_that_is_not_in_the_plan(lab, tmp_path):
 
     assert result.exit_code == 2
     assert "task id 2 is out of range: the plan has 2 task(s)" in result.stderr
+    assert "malformed" not in result.stderr  # a bad task id is not a bad plan
 
 
 def test_run_plan_rejects_a_file_that_is_not_a_plan(tmp_path):

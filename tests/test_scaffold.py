@@ -74,6 +74,7 @@ def test_a_laboratory_name_must_be_a_lowercase_identifier(name):
         (["Bad"], "section name 'Bad' must be a lowercase identifier"),
         (["seed"], "'seed' is reserved"),
         (["configs"], "'configs' is reserved"),
+        (["zip"], "'zip' is reserved"),
         (["config"], "class named Config, which clashes"),  # would shadow mechane's own Config
         (["instance"], "class named Instance, which clashes"),
         (["walk_lab"], "class named WalkLab, which clashes"),  # the lab's own class
