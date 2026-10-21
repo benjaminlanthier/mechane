@@ -93,7 +93,7 @@ scheduler or a workflow tool to run one task at a time.
 From GitHub (pin a tag or commit for reproducibility, not `main`):
 
 ```bash
-pip install "mechane @ git+https://github.com/benjaminlanthier/mechane@v0.1.1"
+pip install "mechane @ git+https://github.com/benjaminlanthier/mechane@v0.2.0"
 ```
 
 With [uv](https://docs.astral.sh/uv/), in your project's `pyproject.toml`:
@@ -103,7 +103,7 @@ With [uv](https://docs.astral.sh/uv/), in your project's `pyproject.toml`:
 dependencies = ["mechane"]
 
 [tool.uv.sources]
-mechane = { git = "https://github.com/benjaminlanthier/mechane", tag = "v0.1.1" }
+mechane = { git = "https://github.com/benjaminlanthier/mechane", tag = "v0.2.0" }
 ```
 
 From a local checkout (development):
