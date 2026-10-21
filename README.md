@@ -15,7 +15,7 @@ you bring the parameters and a `run()` method.
 > The name is the Greek *mēchanē* (μηχανή), the stage crane that lowered a god onto the scene
 > to run the show, the origin of *deus ex machina*.
 
-**Status:** alpha (`0.1.x`). The API may still change. Python ≥ 3.13. Dependencies: `click`, `numpy`.
+**Status:** alpha (`0.2.x`). The API may still change. Python ≥ 3.13. Dependencies: `click`, `numpy`.
 Known rough edges are listed under [Design notes and limitations](#design-notes-and-limitations).
 
 ## Contents
@@ -432,8 +432,8 @@ Each `results.json` holds:
   "inputs":  { ... },     // what was sampled or generated
   "outputs": { ... },     // what was measured
   "meta": {
-    "hostname": "...", "platform": "...", "python": "3.13.8",
-    "packages": {"mechane": "0.1.0", "numpy": "..."},   // see Laboratory.track_packages
+    "hostname": "...", "platform": "...", "python": "3.13.16",
+    "packages": {"mechane": "0.2.0", "numpy": "..."},   // see Laboratory.track_packages
     "slurm": {"SLURM_JOB_ID": "...", "SLURM_ARRAY_TASK_ID": "..."},
     "git": {"commit": "...", "dirty": false},           // null if not in a git repo; dirty = tracked
                                                         // files modified (untracked files are ignored)
