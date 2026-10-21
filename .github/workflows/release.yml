@@ -1,22 +1,47 @@
 name: Release
 
-# Fully automatic releases, with the version kept in pyproject.toml.
-# After CI succeeds on main:
+# Releases with the version kept in pyproject.toml. Nothing is uploaded to PyPI.
+#
+# AUTOMATIC: after CI succeeds on a push to main,
 #   - if the version in pyproject.toml has no tag yet, it is released as it is (this is how the
-#     first release works, and how you can pick a version by hand: edit it on dev, merge);
+#     first release works, and how you pick a version by hand: run `uv version 0.2.0` on dev,
+#     which updates pyproject.toml AND uv.lock, commit, merge);
 #   - otherwise the version is bumped: patch by default, "#minor" or "#major" in any commit
-#     message since the last release for a minor / major bump.
-# A bump is committed to main (pyproject.toml and uv.lock, marked [skip ci]), then built, tagged
-# and published as a GitHub release. A merge that changes nothing in src/, pyproject.toml or
-# uv.lock (a README edit, say) does not release. Nothing is uploaded to PyPI.
+#     message since the last release (squash-merge: in the PR title or description) for a
+#     minor / major bump.
+#
+# MANUAL: Actions > Release > Run workflow (on main), to choose the bump (patch / minor / major)
+# or to type an exact version. It needs a green CI run on the latest commit of main.
+#
+# A bump is committed to main (pyproject.toml and uv.lock), built, tagged and published as a
+# GitHub release, then merged back into dev so that dev carries the new version too. A merge that
+# changes nothing in src/, pyproject.toml or uv.lock (a README edit, say) does not release.
+#
+# The bump commit deliberately has NO "[skip ci]" in its message: GitHub skips any push whose
+# head commit contains it, and such a message travels (merge into dev, squash-merge into main)
+# and silently kills the next CI and release. A loop is impossible anyway: if the bump push
+# triggers CI (only possible with RELEASE_TOKEN), the release job finds that the tag already
+# points at HEAD and does nothing.
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Part of the version to bump (auto = patch, or minor/major from #minor/#major in commit messages)"
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+      version:
+        description: "Exact version to release, e.g. 1.0.0 (overrides 'bump')"
+        type: string
+        required: false
 
 permissions:
   contents: write
+  actions: read # manual runs check that CI passed on the commit
 
 concurrency:
   group: release
@@ -24,12 +49,16 @@ concurrency:
 
 jobs:
   release:
-    # Only after a green CI run (lint, type-check, tests, wheel smoke test) on main.
-    if: github.event.workflow_run.conclusion == 'success'
+    # Manual runs, or an automatic run after a green CI run on a push to main (not on a pull
+    # request that happens to come from a branch called "main").
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      contains(fromJSON('["push", "workflow_dispatch"]'), github.event.workflow_run.event))
     runs-on: ubuntu-latest
     env:
-      # The exact commit CI validated.
-      SHA: ${{ github.event.workflow_run.head_sha }}
+      # The exact commit CI validated (for a manual run: the commit it was started on).
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -42,34 +71,55 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Check that CI passed on this commit (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PASSED="$(gh run list --workflow CI --commit "${SHA}" --status success --limit 1 --json databaseId --jq length)"
+          if [ "${PASSED}" != "1" ]; then
+            echo "::error::CI has not passed on ${SHA}. Run CI on it first (Actions > CI > Run workflow)."
+            exit 1
+          fi
+
       - name: Work out the version to release
         id: next
+        env:
+          BUMP_INPUT: ${{ github.event.inputs.bump }}
+          VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
+          stop() {
+            echo "$1"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          has_tag() { git rev-parse -q --verify "refs/tags/$1" > /dev/null; }
+
           # Only the tip of main can receive a bump commit. If main has moved on, the run for
           # the newer commit will release this one too.
           if [ "$(git ls-remote origin refs/heads/main | cut -f1)" != "${SHA}" ]; then
-            echo "main has moved on since ${SHA}: the run for its newer commit will release."
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            stop "${SHA} is not the tip of main (any more): the run for the newest commit releases."
           fi
 
           CURRENT="$(uv version --short)"
           LAST="v${CURRENT}"
 
-          if ! git rev-parse -q --verify "refs/tags/${LAST}" > /dev/null; then
+          if [ -n "${VERSION_INPUT}" ]; then
+            NEXT="$(uv version "${VERSION_INPUT}" --dry-run --short)" # validates and normalises
+            echo "Manual run: exact version ${NEXT}."
+          elif [ -n "${BUMP_INPUT}" ] && [ "${BUMP_INPUT}" != "auto" ]; then
+            NEXT="$(uv version --bump "${BUMP_INPUT}" --dry-run --short)"
+            echo "Manual run: ${LAST} -> v${NEXT} (${BUMP_INPUT})."
+          elif ! has_tag "${LAST}"; then
             echo "${LAST} has no tag yet: releasing it as it is."
-            BUMP=false
             NEXT="${CURRENT}"
           else
             if [ "$(git rev-list --count "${LAST}..HEAD")" = "0" ]; then
-              echo "Nothing new since ${LAST}."
-              echo "release=false" >> "$GITHUB_OUTPUT"
-              exit 0
+              stop "Nothing new since ${LAST}."
             fi
             if git diff --quiet "${LAST}" HEAD -- src pyproject.toml uv.lock; then
-              echo "Nothing in src/, pyproject.toml or uv.lock changed since ${LAST}: no release."
-              echo "release=false" >> "$GITHUB_OUTPUT"
-              exit 0
+              stop "Nothing in src/, pyproject.toml or uv.lock changed since ${LAST}: no release."
             fi
             MESSAGES="$(git log "${LAST}..HEAD" --format=%B)"
             if grep -qE '#major\b' <<< "${MESSAGES}"; then
@@ -79,11 +129,17 @@ jobs:
             else
               PART=patch
             fi
-            BUMP=true
             NEXT="$(uv version --bump "${PART}" --dry-run --short)"
             echo "${LAST} -> v${NEXT} (${PART})"
           fi
 
+          # Fail now, before anything is pushed, rather than half-way through the release.
+          if has_tag "v${NEXT}"; then
+            echo "::error::The tag v${NEXT} already exists. Pick a version that has not been released."
+            exit 1
+          fi
+
+          if [ "${NEXT}" = "${CURRENT}" ]; then BUMP=false; else BUMP=true; fi
           {
             echo "release=true"
             echo "bump=${BUMP}"
@@ -100,7 +156,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add pyproject.toml uv.lock
-          git commit -m "Release v${VERSION} [skip ci]"
+          git commit -m "Release v${VERSION}"
 
       - name: Build
         if: steps.next.outputs.release == 'true'
@@ -127,3 +183,28 @@ jobs:
           fi
           gh release create "${TAG}" dist/* \
             --target "$(git rev-parse HEAD)" --title "${TAG}" --generate-notes
+
+      # Keeps the version on dev in step with main, so that picking a version by hand on dev
+      # never conflicts with the bump. A merge commit (not a cherry-pick) is used on purpose: the
+      # bump then counts as already merged and does not show up again in the next PR to main.
+      # If dev has diverged too much to merge cleanly, this only warns; the release is done.
+      # Delete this step if you do not want the workflow to touch dev.
+      - name: Merge the release commit back into dev
+        if: steps.next.outputs.release == 'true' && steps.next.outputs.bump == 'true'
+        env:
+          TAG: ${{ steps.next.outputs.tag }}
+          DEV: dev
+        run: |
+          if ! git ls-remote --exit-code --heads origin "${DEV}" > /dev/null; then
+            echo "No ${DEV} branch: nothing to sync."
+            exit 0
+          fi
+          RELEASED="$(git rev-parse HEAD)"
+          git fetch origin "${DEV}"
+          git checkout -B "${DEV}" "origin/${DEV}"
+          if git merge --no-ff -m "Merge main into ${DEV} after release ${TAG}" "${RELEASED}"; then
+            git push origin "${DEV}" || echo "::warning::Could not push ${DEV} (protected?). Merge main into ${DEV} by hand."
+          else
+            git merge --abort
+            echo "::warning::${DEV} does not merge cleanly with main. Merge main into ${DEV} by hand to pick up ${TAG}."
+          fi
