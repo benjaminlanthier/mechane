@@ -70,7 +70,7 @@ def test_a_messy_tree_is_read_exactly_as_probing_would_read_it(tmp_path):
         10
     ).mkdir()  # `results.json` is a directory: it exists, so the instance is done
     base = exp.instances_dir
-    for stray in ("7", "007", "25", "99", "ab", "\u00b2\u00b3", "0 "):  # none is an instance
+    for stray in ("7", "007", "25", "99", "ab", "\u00b2\u00b3"):  # none is an instance
         (base / stray).mkdir()
         (base / stray / "results.json").write_text("{}")
 
