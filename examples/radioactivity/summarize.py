@@ -1,7 +1,8 @@
 """Compare the Monte Carlo estimates in the exported tables with the exact answers.
 
 Usage: python summarize.py outputs/decay.csv outputs/half_life.csv
-The name of each table says which lab it comes from.
+The name of each table says which lab it comes from. The exact answers come from the science
+package, like the estimates.
 """
 
 import csv
@@ -11,17 +12,19 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from radioactivity import exact_half_life, exact_surviving_fraction
+
 # lab: (the parameter columns, the output, the exact answer as a function of the parameters)
 LABS = {
     "decay": (
         ("decay.rate", "decay.n_atoms", "observation.t"),
         "surviving_fraction",
-        lambda rate, n_atoms, t: math.exp(-rate * t),
+        lambda rate, n_atoms, t: exact_surviving_fraction(rate, t),
     ),
     "half_life": (
         ("decay.rate", "decay.n_atoms"),
         "half_life",
-        lambda rate, n_atoms: math.log(2) / rate,
+        lambda rate, n_atoms: exact_half_life(rate),
     ),
 }
 

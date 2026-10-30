@@ -24,9 +24,6 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-xdist>=3.8.0",
 ]
-examples = [
-    "snakemake>=9.27.0",
-]
 
 [tool.pytest.ini_options]
 pythonpath = [".", "src", "tests"]
@@ -47,9 +44,18 @@ filterwarnings = [
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-src = ["src", "tests"]
+# The example project's packages are first-party too (ruff sorts their imports, ty resolves them).
+src = [
+    "src",
+    "tests",
+    "examples/radioactivity/src",
+    "examples/radioactivity/experiments/src",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
 # Declarative class-level registries (`section_classes = {...}`) are intentional, not mutable defaults.
 ignore = ["RUF012"]
+
+[tool.ty.environment]
+extra-paths = ["examples/radioactivity/src", "examples/radioactivity/experiments/src"]

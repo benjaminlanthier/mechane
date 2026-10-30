@@ -194,8 +194,7 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,python
 
-examples/snakemake/.snakemake
-examples/snakemake/done
-examples/snakemake/plans
-examples/snakemake/outputs
-examples/snakemake/*.json
+examples/radioactivity/.snakemake
+examples/radioactivity/done
+examples/radioactivity/plans
+examples/radioactivity/outputs

@@ -2,15 +2,16 @@ from pathlib import Path
 
 from mechane import grid
 
-# Absolute, so that every mechane command finds the results wherever it is run from.
-OUTPUTS = Path("outputs").resolve()
+# Next to this file, and absolute: every mechane command finds the results wherever it runs.
+OUTPUTS = Path(__file__).resolve().parent / "outputs"
 
 # Two labs, each with its own ROOT (so its own manifest), seed, number of instances and sweep.
-# The Snakefile's LABS lists the same names: the last part of each ROOT.
+# "decay" and "half_life" are the entry points of experiments/pyproject.toml. The Snakefile's
+# LABS lists the same names: the last part of each ROOT.
 LABS = [
     {
         "ROOT": OUTPUTS / "decay",
-        "LABORATORY": "decay:DecayLab",
+        "LABORATORY": "decay",
         "PARAMS": {
             "seed": 1,
             "num_instances": 20,
@@ -20,7 +21,7 @@ LABS = [
     },
     {
         "ROOT": OUTPUTS / "half_life",
-        "LABORATORY": "decay:HalfLifeLab",
+        "LABORATORY": "half_life",
         "PARAMS": {
             "seed": 2,
             "num_instances": 50,

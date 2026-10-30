@@ -635,17 +635,27 @@ in your project's Snakemake profile, not in mechane.
 | Which instances are done: finished ones are skipped, failures leave a traceback | Resources, retries, and submitting jobs to a cluster |
 | `status --check`, `doctor`, `errors`, `replay`: is it complete, consistent, reproducible? | Re-running only what is out of date |
 
-A complete, runnable project is in [`examples/snakemake/`](examples/snakemake/): two small
-Monte Carlo labs defined in one params file (see [several labs](#the-params-file)), a Snakefile and
-an analysis script. Abridged, its core is four rules; every rule after `setup` runs once per lab,
-through the `{lab}` wildcard:
+A complete, runnable project is in [`examples/radioactivity/`](examples/radioactivity/), laid
+out the way a research repository would be: a uv workspace of two packages, the science
+(`radioactivity`, which knows nothing about mechane) and its `experiments` member, which holds two
+mechane labs built on it. The workflow sits at the workspace root: one params file for both labs
+(see [several labs](#the-params-file)), a Snakefile and an analysis script. The labs are
+registered as [entry points](#registering-your-laboratory), so no `PYTHONPATH` is needed:
+
+```bash
+cd examples/radioactivity
+uv run --group workflow snakemake -c4
+```
+
+Abridged, the Snakefile's core is four rules; every rule after `setup` runs once per lab, through
+the `{lab}` wildcard:
 
 ```python
 LABS = ["decay", "half_life"]                # the ROOTs in params.py are outputs/<lab>
 MANIFEST = "outputs/{lab}/manifest.json"
 
 rule setup:                       # expand both sweeps, write one manifest per lab
-    input: "params.py", "decay.py"
+    input: "params.py", "experiments/src/radioactivity_experiments/families/decay.py", ...
     output: expand(MANIFEST, lab=LABS)
     shell: "mechane setup --params-file {input[0]}"
 
@@ -1005,7 +1015,7 @@ likewise importable but not part of the top-level API.
 
 | Symptom | Cause and fix |
 |---|---|
-| `ModuleNotFoundError: my_lab` when running `mechane …` | The console script does not put the current directory on `sys.path`. Install your lab as a package, or `export PYTHONPATH=$PWD` (and do the same in your job script; the Snakemake example sets it with `shell.prefix`). |
+| `ModuleNotFoundError: my_lab` when running `mechane …` | The console script does not put the current directory on `sys.path`. Install your lab as a package (the example project does, as a uv workspace member), or `export PYTHONPATH=$PWD` (and do the same in your job script). |
 | `… is not importable by reference` at `setup` | The lab is defined in `__main__` or a local scope. Move it to an importable module. |
 | `Experiments N and M map to the same directory` | They differ only in `hash_exclude` fields, or the sweep repeats a point. Remove the duplicate or make the differing field part of the hash. |
 | `Unknown configs keys […]` | A top-level key in `PARAMS` is not `seed`, `num_instances` or a section name. Check for a typo. |
@@ -1047,6 +1057,10 @@ of lines and branches. Lint, format and type checks are `ruff` and `ty`.
 
 CI runs the lint and type checks, the tests on Linux and macOS, and builds the wheel and
 smoke-tests the `mechane` command in a clean environment.
+
+The example project in `examples/radioactivity/` is a uv workspace with its own `uv.lock`, which
+records mechane's metadata. After changing mechane's `pyproject.toml`, run
+`uv lock --directory examples/radioactivity` as well; CI checks that this lock is up to date.
 
 Releases are automatic. After CI succeeds on `main`, the release workflow tags and publishes a
 GitHub release: if the version in `pyproject.toml` has no tag yet it is released as it is,
@@ -1092,8 +1106,9 @@ src/mechane/
                        run_plan, errors, doctor, stats, list_experiments, replay, shell, export,
                        clean, init)
 examples/
-  snakemake/           a project that uses mechane with Snakemake: two labs in one params file,
-                       a Snakefile, analysis
+  radioactivity/       a research project as a uv workspace: the science package and an
+                       `experiments` member with two labs; at the root, the workflow (one params
+                       file, a Snakefile, analysis)
 tests/
   toy.py               a minimal non-trivial lab, a template for new ones
   conftest.py          fixtures: `register_laboratory`, a set-up two-experiment `lab`, helpers
@@ -1110,7 +1125,7 @@ tests/
   test_selection.py, test_plan.py, test_errors.py, test_doctor.py, test_stats.py,
   test_listing.py, test_replay.py, test_export.py, test_clean.py, test_scaffold.py
                        the logic of each newer command, in `core`
-  test_examples.py     the Snakemake example keeps working (lab, analysis, mechane calls)
+  test_examples.py     the example project keeps working (workspace, labs, analysis, Snakefile)
   test_architecture.py the layering rules below, enforced on the imports
 ```
 
