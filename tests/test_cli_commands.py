@@ -660,6 +660,14 @@ def test_export_with_nothing_finished_says_so_on_stderr(lab):
     assert "No finished instances to export." in result.stderr
 
 
+def test_export_with_nothing_finished_fails_when_a_file_was_asked_for(lab, tmp_path):
+    table = tmp_path / "table.csv"
+    result = invoke(export, *with_manifest(lab, "--output", str(table)))
+    assert result.exit_code == 1
+    assert f"No finished instances to export; {table} not written." in result.stderr
+    assert not table.exists()
+
+
 def test_export_can_be_narrowed(lab, run_instances):
     run_instances(lab, 0, [0])
     run_instances(lab, 1, [0])

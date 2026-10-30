@@ -186,7 +186,8 @@ def test_the_snakefile_names_files_that_exist():
 
 def test_the_snakefile_calls_only_mechane_commands_and_options_that_exist():
     snakefile = (EXAMPLE / "Snakefile").read_text()
-    calls = re.findall(r'"mechane ([a-z-]+)([^"]*)"', snakefile)
+    # Each call starts a string literal, alone or chained after `&&`.
+    calls = re.findall(r'"(?: && )?mechane ([a-z-]+)([^"&]*)', snakefile)
 
     assert {name for name, _ in calls} >= {"setup", "plan", "run-plan", "status", "export"}
     for name, arguments in calls:

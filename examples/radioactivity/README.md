@@ -99,7 +99,7 @@ The two labs:
 | Rule | Runs | Why a separate stage |
 |---|---|---|
 | `setup` | `mechane setup` | Expands both sweeps and writes one manifest per lab, `outputs/<lab>/manifest.json`. Re-runs when `params.py` or a module of `families/` changes. |
-| `make_plan` | `mechane plan` | Splits a lab's work into tasks, `plans/<lab>.json`. It is a *checkpoint*: how many tasks there are is only known once the manifest exists. |
+| `make_plan` | `mechane plan` | Splits a lab's work into tasks, `outputs/<lab>/plan.json`. It is a *checkpoint*: how many tasks there are is only known once the manifest exists. |
 | `run_task` | `mechane run-plan` | One Snakemake job per mechane task. Finished instances are skipped. |
 | `complete` | `mechane status --check` | A gate: fails unless every instance of every experiment of the lab is done. |
 | `export` | `mechane export` | A lab's results as a table, `outputs/<lab>.csv`, one row per instance. |
@@ -131,10 +131,15 @@ after a failure; with `snakemake -c4 --keep-going` the other lab still finishes 
 - **Granularity.** One Snakemake job runs a *task* of several instances (`BATCH_SIZE` in the
   Snakefile), not one instance, because every process starts Python and loads the manifest again.
   `mechane stats --batch-size N` helps you choose `BATCH_SIZE` and the `runtime` resource.
-- **mechane is the source of truth for "done".** Snakemake's `done/<lab>/task_N` files only mean
-  "this task ran without failures". If you delete or `mechane clean` results behind Snakemake's
-  back, it will not notice. Tell it with `--forcerun run_task`, which is cheap because mechane
-  skips finished instances.
+- **mechane is the source of truth for "done".** Snakemake marks a finished task with an empty
+  file, `outputs/<lab>/.snakemake-done/task_N`, which only means "this task ran without
+  failures". The markers and the plan live inside each lab's `ROOT`, next to the results (mechane
+  ignores a hidden directory and a plain file there), so moving, renaming or deleting `outputs/`
+  or a lab's folder takes them along, and the next run redoes that lab's tasks by itself.
+  Results removed *inside* a lab's folder (`mechane clean`, or deleting instances) are a different
+  case: the markers stay, so Snakemake does not rerun the tasks, but `export` checks again with
+  `mechane status --check` and fails, naming how many instances are not done. Tell Snakemake with
+  `--forcerun run_task`, which is cheap because mechane skips finished instances.
 - **Failures.** `mechane run-plan` exits with status 1 when any instance of its task failed, so
   the job fails, and the lab's `complete`, `export` and `summarize` do not run. Look with
   `mechane errors` and `mechane doctor`, fix the code, and run `snakemake` again: the failed tasks

@@ -15,7 +15,11 @@ OUTPUT_PATH = Path("outputs")
 LABS = ["decay", "half_life"]  # the ROOTs in params.py are outputs/<lab>
 PARAMS_FILE = "params.py"
 MANIFEST = str(OUTPUT_PATH / "{lab}" / "manifest.json")  # ROOT in params.py, plus manifest.json
-PLAN = "plans/{lab}.json"
+# A lab's plan and Snakemake's "done" markers live in the lab's own ROOT, next to its results: moving
+# or deleting a lab's results takes them along, so Snakemake never trusts markers of results that
+# are gone. (mechane ignores both: a file, and a hidden directory.)
+PLAN = str(OUTPUT_PATH / "{lab}" / "plan.json")
+DONE = str(OUTPUT_PATH / "{lab}" / ".snakemake-done")
 BATCH_SIZE = 5  # instances per Snakemake job: one job per mechane task, not one per instance
 
 wildcard_constraints:
@@ -29,14 +33,14 @@ rule all:
 
 rule setup:  # stage 1: expand both sweeps and write one manifest per lab
     input:
-        PARAMS_FILE,
         # the families' sections define the sweeps
         "experiments/src/radioactivity_experiments/families/decay.py",
         "experiments/src/radioactivity_experiments/families/half_life.py",
+        params=PARAMS_FILE,
     output:
         expand(MANIFEST, lab=LABS),
     shell:
-        "mechane setup --params-file {input[0]}"
+        "mechane setup --params-file {input.params}"
 
 
 checkpoint make_plan:  # stage 2: split a lab's work into tasks (known only once its manifest exists)
@@ -52,7 +56,7 @@ rule run_task:  # stage 3: one job per task; finished instances are skipped, fai
     input:
         PLAN,
     output:
-        touch(Path("done") / "{lab}" / "task_{t}"),
+        touch(DONE + "/task_{t}"),
     resources:
         runtime=10,  # minutes: `mechane stats --batch-size 5` suggests a value once instances ran
     shell:
@@ -62,7 +66,7 @@ rule run_task:  # stage 3: one job per task; finished instances are skipped, fai
 def all_tasks(wildcards):
     plan = json.load(open(checkpoints.make_plan.get(lab=wildcards.lab).output[0]))
     # `num_tasks` counts the tasks; `tasks` is grouped by experiment, so len() would count those
-    return expand("done/{lab}/task_{t}", lab=wildcards.lab, t=range(plan["num_tasks"]))
+    return expand(DONE + "/task_{t}", lab=wildcards.lab, t=range(plan["num_tasks"]))
 
 
 rule complete:  # stage 4: a gate that asks mechane whether every instance of the lab is done
@@ -70,19 +74,21 @@ rule complete:  # stage 4: a gate that asks mechane whether every instance of th
         tasks=all_tasks,
         manifest=MANIFEST,
     output:
-        touch(Path("done") / "{lab}" / "complete"),
+        touch(DONE + "/complete"),
     shell:
         "mechane status --manifest-path {input.manifest} --check"
 
 
 rule export:  # stage 5: a lab's results as a table, one row per instance
     input:
-        Path("done") / "{lab}" / "complete",
+        DONE + "/complete",
         manifest=MANIFEST,
     output:
         OUTPUT_PATH / "{lab}.csv",
     shell:
-        "mechane export --manifest-path {input.manifest} --output {output}"
+        # Check again: the `complete` marker says the lab WAS complete, not that it still is.
+        "mechane status --manifest-path {input.manifest} --check > /dev/null"
+        " && mechane export --manifest-path {input.manifest} --output {output}"
 
 
 rule summarize:  # stage 6: your analysis, here of both labs together

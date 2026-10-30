@@ -530,11 +530,12 @@ where KEY is a dotted parameter as in the manifest (`walk.dim`, `solver.sigma`, 
 - `1`: `run-batch` or `run-plan` when any instance failed (once the batch has finished; with
   `--fail-fast`, the first exception is re-raised); `status --check` when any instance is not
   done; `doctor` when it finds errors (warnings too with `--strict`); `replay` when the replay
-  differs from the stored result; and an exception raised by an instance in `run` or `replay`.
+  differs from the stored result; `export --output FILE` when there is no finished instance to
+  export (the file is not written); and an exception raised by an instance in `run` or `replay`.
 - `2`: usage errors (a bad option, an unknown `--where` key, a task id outside the plan, a params
   file that names no laboratory).
 - `status` without `--check`, `aggregate`, `list`, `errors`, `stats` and `export` exit `0` whenever
-  they run, even if work is missing or failed. Use `status --check` (is everything done?) and
+  they run, even if work is missing or failed (except `export --output` with nothing to export). Use `status --check` (is everything done?) and
   `doctor` (is what is there consistent?) to turn that into a check, for instance as a gate in a
   workflow.
 
@@ -655,23 +656,23 @@ LABS = ["decay", "half_life"]                # the ROOTs in params.py are output
 MANIFEST = "outputs/{lab}/manifest.json"
 
 rule setup:                       # expand both sweeps, write one manifest per lab
-    input: "params.py", "experiments/src/radioactivity_experiments/families/decay.py", ...
+    input: "experiments/src/radioactivity_experiments/families/decay.py", ..., params="params.py"
     output: expand(MANIFEST, lab=LABS)
-    shell: "mechane setup --params-file {input[0]}"
+    shell: "mechane setup --params-file {input.params}"   # not {input}: that is every input
 
 checkpoint make_plan:             # split a lab's work into tasks
     input: MANIFEST
-    output: "plans/{lab}.json"
+    output: "outputs/{lab}/plan.json"     # in the lab's ROOT, next to its results
     shell: "mechane plan --manifest-path {input} --batch-size {BATCH_SIZE} --output {output} > /dev/null"
 
 rule run_task:                    # one Snakemake job per mechane task
-    input: "plans/{lab}.json"
-    output: touch("done/{lab}/task_{t}")
+    input: "outputs/{lab}/plan.json"
+    output: touch("outputs/{lab}/.snakemake-done/task_{t}")
     shell: "mechane run-plan --plan-file {input} --task-id {wildcards.t}"
 
 rule complete:                    # a gate: fails unless every instance of the lab is done
     input: tasks=all_tasks, manifest=MANIFEST
-    output: touch("done/{lab}/complete")
+    output: touch("outputs/{lab}/.snakemake-done/complete")
     shell: "mechane status --manifest-path {input.manifest} --check"
 ```
 
@@ -684,11 +685,14 @@ Things to know:
   1.95 s, against 0.18 s in a single `run-batch`: about 160 ms of Python start-up per process,
   which matters when instances are short. Snakemake built a 5,000-job DAG in about 4 s in a dry
   run, so the number of jobs is not what hurts: the cost per job is.
-- **mechane is the source of truth for "done".** Snakemake's `done/task_N` files only mean "this
-  task ran without failures". If you delete results or run `mechane clean` behind Snakemake's
-  back, it does not notice, and `snakemake` says "Nothing to be done". Tell it with
-  `snakemake --forcerun run_task`: that is cheap, because mechane skips finished instances. The
-  `complete` gate then confirms that everything really is done.
+- **mechane is the source of truth for "done".** Snakemake's task markers only mean "this task
+  ran without failures". Keep them, and the plan, inside the lab's `ROOT` as above: then moving or
+  deleting a lab's results takes its markers along, and Snakemake reruns the tasks by itself
+  (`mechane doctor` ignores hidden directories and plain files there). If you remove results
+  *inside* a lab's folder (`mechane clean`), the markers stay and `snakemake` says "Nothing to be
+  done". Tell it with `snakemake --forcerun run_task`: that is cheap, because mechane skips
+  finished instances. The example also runs `status --check` again before exporting, so a stale
+  marker never produces an incomplete table.
 - **Failures stop the pipeline.** `run-plan` exits 1 when any instance of its task failed, so the
   job fails and nothing downstream runs. Look with `mechane errors` and `mechane doctor`, fix the
   code, and run `snakemake` again: the failed tasks run again.
@@ -1038,7 +1042,7 @@ likewise importable but not part of the top-level API.
 | `Error: task id N is out of range: the plan has M task(s)` | The scheduler ran more tasks than the plan has. Task ids go from 0 to the number of tasks minus one, which the first line of `mechane plan` shows; use the plan file the job was given. |
 | `Error: refusing to remove the results of every experiment` | `clean --what results` needs `--experiment-id` or `--where`, or `--all-experiments`. |
 | `NOT reproduced: the replay differs from the stored result` | The code changed since the instance ran (`mechane doctor` shows mixed code versions), the computation is not deterministic, or the difference is numerical noise that `--rtol` would absorb. |
-| Snakemake says `Nothing to be done` although results were deleted or cleaned | Its `done/` files do not know about that. Run `snakemake --forcerun run_task` (cheap: finished instances are skipped). |
+| Snakemake says `Nothing to be done` although results were deleted or cleaned | Its task markers do not know about that. Run `snakemake --forcerun run_task` (cheap: finished instances are skipped). Keeping the markers inside each lab's `ROOT`, as the example does, makes moving or deleting a lab's folder rerun its tasks by itself. |
 | `Cannot serialize … to JSON` | A parameter or output is a type `to_jsonable` doesn't know. Convert it to a plain type before returning it. |
 
 ## Development
