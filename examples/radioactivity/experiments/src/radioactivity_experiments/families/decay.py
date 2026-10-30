@@ -1,8 +1,6 @@
-"""A small laboratory for the Snakemake example: Monte Carlo radioactive decay.
+"""The `decay` family: the fraction of atoms still alive at time `t`.
 
-Each instance draws the lifetime of `n_atoms` atoms from an exponential distribution and reports
-the fraction still alive at time `t`. The exact answer is exp(-rate * t), which `summarize.py`
-compares the estimates with.
+The science stays in `radioactivity`: an instance samples lifetimes and measures them with it.
 """
 
 from dataclasses import dataclass
@@ -16,6 +14,7 @@ from mechane import (
     InstanceOutput,
     Laboratory,
 )
+from radioactivity import sample_lifetimes, surviving_fraction
 
 
 @dataclass(frozen=True)
@@ -49,9 +48,9 @@ class DecayInstance(Instance):
 
     def run(self):
         configs = self.experiment.config.configs
-        lifetimes = self.rng.exponential(1.0 / configs.decay.rate, size=configs.decay.n_atoms)
-        alive = float((lifetimes > configs.observation.t).mean())
-        return InstanceOutput(outputs={"surviving_fraction": alive})
+        lifetimes = sample_lifetimes(self.rng, configs.decay.rate, configs.decay.n_atoms)
+        fraction = surviving_fraction(lifetimes, configs.observation.t)
+        return InstanceOutput(outputs={"surviving_fraction": fraction})
 
 
 class DecayLab(Laboratory):

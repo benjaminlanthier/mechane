@@ -136,6 +136,52 @@ def test_setup_rejects_a_params_file_python_cannot_load(tmp_path):
     assert "Could not load module" in str(result.exception)
 
 
+def write_two_labs(tmp_path: Path, second_section: str = "model") -> Path:
+    """Two toy labs with their own root, seed and number of instances."""
+    f = tmp_path / "params.py"
+    f.write_text(
+        "from pathlib import Path\n"
+        f"OUT = Path({str(tmp_path / 'out')!r})\n"
+        "LABS = [\n"
+        "    {'ROOT': OUT / 'a', 'LABORATORY': 'toy:ToyLab',\n"
+        "     'PARAMS': {'seed': 1, 'num_instances': 2, 'model': {'L': 2},\n"
+        "                'solver': {'sigma': 1.0}}},\n"
+        "    {'ROOT': OUT / 'b', 'LABORATORY': 'toy:ToyLab',\n"
+        f"     'PARAMS': {{'seed': 5, 'num_instances': 3, {second_section!r}: {{'L': 2}},\n"
+        "                'solver': {'sigma': 1.0}}},\n"
+        "]\n"
+    )
+    return f
+
+
+def test_setup_sets_up_every_lab_of_labs(tmp_path):
+    result = CliRunner().invoke(setup_lab, ["--params-file", str(write_two_labs(tmp_path))])
+
+    assert result.exit_code == 0, result.output
+    assert "[Setup] 1 experiments x 2 instances" in result.output
+    assert "[Setup] 1 experiments x 3 instances" in result.output
+    for name, seed in (("a", 1), ("b", 5)):
+        manifest = json.loads((tmp_path / "out" / name / "manifest.json").read_text())
+        assert manifest["seed"] == seed
+
+
+def test_setup_writes_nothing_when_one_of_the_labs_is_wrong(tmp_path):
+    params = write_two_labs(tmp_path, second_section="modle")  # a typo in the second lab
+    result = CliRunner().invoke(setup_lab, ["--params-file", str(params)])
+
+    assert isinstance(result.exception, ValueError)
+    assert "Unknown configs keys ['modle']" in str(result.exception)
+    assert not (tmp_path / "out").exists()
+
+
+def test_setup_reports_a_malformed_labs_as_a_usage_error(tmp_path):
+    params = tmp_path / "params.py"
+    params.write_text("LABS = []\n")
+    result = CliRunner().invoke(setup_lab, ["--params-file", str(params)])
+    assert result.exit_code == 2
+    assert "LABS is empty" in result.output
+
+
 # --------------------------------------------------------------------------- run-batch
 @pytest.mark.parametrize("ids", ["", ",", " , ", "-1,2", "3,-4"])
 def test_run_batch_rejects_empty_or_negative_ids(tmp_path, ids):

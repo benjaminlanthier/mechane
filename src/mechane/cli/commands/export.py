@@ -57,6 +57,8 @@ def export(
         include_meta=include_meta,
     )
     if not table.rows:
+        if output is not None:  # the caller expects the file: not writing it is a failure
+            raise click.ClickException(f"No finished instances to export; {output} not written.")
         click.echo("No finished instances to export.", err=True)
         return
     stream = output.open("w") if output is not None else sys.stdout

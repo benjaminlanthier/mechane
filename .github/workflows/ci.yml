@@ -28,6 +28,8 @@ jobs:
             pyproject.toml
             uv.lock
       - run: uv sync --locked
+      # The example project is a separate uv workspace with its own lock.
+      - run: uv lock --check --directory examples/radioactivity
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pre-commit

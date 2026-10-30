@@ -1,0 +1,100 @@
+# Snakemake decides the order of the stages; mechane decides what each stage runs and where the
+# results go. Run it from this directory (the workspace root) with:
+#
+#     uv run --group workflow snakemake -c4
+#
+# The `workflow` group installs the `experiments` member (the labs, and mechane) and Snakemake, so
+# `mechane` is on the PATH and the labs are importable from their entry points: no PYTHONPATH.
+#
+# params.py defines two labs. `setup` sets up both at once; every later stage runs once per lab,
+# through the {lab} wildcard, and the analysis reads both tables.
+import json
+from pathlib import Path
+
+OUTPUT_PATH = Path("outputs")
+LABS = ["decay", "half_life"]  # the ROOTs in params.py are outputs/<lab>
+PARAMS_FILE = "params.py"
+MANIFEST = str(OUTPUT_PATH / "{lab}" / "manifest.json")  # ROOT in params.py, plus manifest.json
+# A lab's plan and Snakemake's "done" markers live in the lab's own ROOT, next to its results: moving
+# or deleting a lab's results takes them along, so Snakemake never trusts markers of results that
+# are gone. (mechane ignores both: a file, and a hidden directory.)
+PLAN = str(OUTPUT_PATH / "{lab}" / "plan.json")
+DONE = str(OUTPUT_PATH / "{lab}" / ".snakemake-done")
+BATCH_SIZE = 5  # instances per Snakemake job: one job per mechane task, not one per instance
+
+wildcard_constraints:
+    lab="|".join(LABS),
+
+
+rule all:
+    input:
+        OUTPUT_PATH / "summary.txt",
+
+
+rule setup:  # stage 1: expand both sweeps and write one manifest per lab
+    input:
+        # the families' sections define the sweeps
+        "experiments/src/radioactivity_experiments/families/decay.py",
+        "experiments/src/radioactivity_experiments/families/half_life.py",
+        params=PARAMS_FILE,
+    output:
+        expand(MANIFEST, lab=LABS),
+    shell:
+        "mechane setup --params-file {input.params}"
+
+
+checkpoint make_plan:  # stage 2: split a lab's work into tasks (known only once its manifest exists)
+    input:
+        MANIFEST,
+    output:
+        PLAN,
+    shell:
+        "mechane plan --manifest-path {input} --batch-size {BATCH_SIZE} --output {output} > /dev/null"
+
+
+rule run_task:  # stage 3: one job per task; finished instances are skipped, failures are reported
+    input:
+        PLAN,
+    output:
+        touch(DONE + "/task_{t}"),
+    resources:
+        runtime=10,  # minutes: `mechane stats --batch-size 5` suggests a value once instances ran
+    shell:
+        "mechane run-plan --plan-file {input} --task-id {wildcards.t}"
+
+
+def all_tasks(wildcards):
+    plan = json.load(open(checkpoints.make_plan.get(lab=wildcards.lab).output[0]))
+    # `num_tasks` counts the tasks; `tasks` is grouped by experiment, so len() would count those
+    return expand(DONE + "/task_{t}", lab=wildcards.lab, t=range(plan["num_tasks"]))
+
+
+rule complete:  # stage 4: a gate that asks mechane whether every instance of the lab is done
+    input:
+        tasks=all_tasks,
+        manifest=MANIFEST,
+    output:
+        touch(DONE + "/complete"),
+    shell:
+        "mechane status --manifest-path {input.manifest} --check"
+
+
+rule export:  # stage 5: a lab's results as a table, one row per instance
+    input:
+        DONE + "/complete",
+        manifest=MANIFEST,
+    output:
+        OUTPUT_PATH / "{lab}.csv",
+    shell:
+        # Check again: the `complete` marker says the lab WAS complete, not that it still is.
+        "mechane status --manifest-path {input.manifest} --check > /dev/null"
+        " && mechane export --manifest-path {input.manifest} --output {output}"
+
+
+rule summarize:  # stage 6: your analysis, here of both labs together
+    input:
+        expand(OUTPUT_PATH / "{lab}.csv", lab=LABS),
+    output:
+        OUTPUT_PATH / "summary.txt",
+    shell:
+        "python summarize.py {input} > {output}"

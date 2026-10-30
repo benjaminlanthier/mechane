@@ -501,7 +501,7 @@ layout of the aggregate itself, override `aggregate_instance_results()`.
 
 | Command | Purpose | Options |
 |---|---|---|
-| `setup` | Expand the sweep, write the manifest, create all instance directories | `--params-file` |
+| `setup` | Expand the sweep, write the manifest, create all instance directories (for each lab of a `LABS` file) | `--params-file` |
 | `run` | Run one instance | `--manifest-path`, `--experiment-id`, `--instance-id`, `--overwrite/--no-overwrite` |
 | `run-batch` | Run several instances of one experiment in one process | `--manifest-path`, `--experiment-id`, `--instance-ids 0,1,2`, `--overwrite/--no-overwrite`, `--continue-on-error/--fail-fast` |
 | `aggregate` | Collect results into `aggregated_results.json` | `--manifest-path` |
@@ -530,11 +530,12 @@ where KEY is a dotted parameter as in the manifest (`walk.dim`, `solver.sigma`, 
 - `1`: `run-batch` or `run-plan` when any instance failed (once the batch has finished; with
   `--fail-fast`, the first exception is re-raised); `status --check` when any instance is not
   done; `doctor` when it finds errors (warnings too with `--strict`); `replay` when the replay
-  differs from the stored result; and an exception raised by an instance in `run` or `replay`.
+  differs from the stored result; `export --output FILE` when there is no finished instance to
+  export (the file is not written); and an exception raised by an instance in `run` or `replay`.
 - `2`: usage errors (a bad option, an unknown `--where` key, a task id outside the plan, a params
   file that names no laboratory).
 - `status` without `--check`, `aggregate`, `list`, `errors`, `stats` and `export` exit `0` whenever
-  they run, even if work is missing or failed. Use `status --check` (is everything done?) and
+  they run, even if work is missing or failed (except `export --output` with nothing to export). Use `status --check` (is everything done?) and
   `doctor` (is what is there consistent?) to turn that into a check, for instance as a gate in a
   workflow.
 
@@ -587,6 +588,37 @@ the current directory of every later command, so `status` run from another direc
 and `aggregate` reports no finished instances. Write `Path("results").resolve()`, as in the
 Quickstart; `doctor` warns about a relative root.
 
+**Several labs in one file.** Define `LABS` instead of the three names above: a list with one
+dict per lab, each with the keys `ROOT`, `LABORATORY` and `PARAMS`. Each lab keeps its own seed,
+number of instances and sweep, and may be a different `Laboratory` class:
+
+```python
+from pathlib import Path
+
+from mechane import grid
+
+RESULTS = Path("results").resolve()
+
+LABS = [
+    {
+        "ROOT": RESULTS / "short",
+        "LABORATORY": "my_lab:WalkLab",
+        "PARAMS": {"seed": 1, "num_instances": 1000, "walk": grid(dim=[1, 2, 3], n_steps=[100])},
+    },
+    {
+        "ROOT": RESULTS / "long",
+        "LABORATORY": "my_lab:WalkLab",
+        "PARAMS": {"seed": 2, "num_instances": 20, "walk": {"dim": 3, "n_steps": 10_000}},
+    },
+]
+```
+
+`mechane setup` sets up every lab and prints one line per lab. It expands every sweep before
+writing anything, so a mistake in one lab's sweep sets up none of them. Each lab gets its own
+`ROOT/manifest.json`, and every other command acts on one lab at a time through
+`--manifest-path`. Two labs cannot share a `ROOT`, because they would overwrite each other's
+manifest. A file defines either `LABS` or `ROOT`/`LABORATORY`/`PARAMS`, not both.
+
 ## Using mechane with Snakemake
 
 `mechane` does not submit jobs and knows nothing about schedulers. It gives schedulers and
@@ -604,32 +636,48 @@ in your project's Snakemake profile, not in mechane.
 | Which instances are done: finished ones are skipped, failures leave a traceback | Resources, retries, and submitting jobs to a cluster |
 | `status --check`, `doctor`, `errors`, `replay`: is it complete, consistent, reproducible? | Re-running only what is out of date |
 
-A complete, runnable project is in [`examples/snakemake/`](examples/snakemake/): a small Monte
-Carlo lab, its sweep, a Snakefile and an analysis script. Abridged, its core is four rules:
+A complete, runnable project is in [`examples/radioactivity/`](examples/radioactivity/), laid
+out the way a research repository would be: a uv workspace of two packages, the science
+(`radioactivity`, which knows nothing about mechane) and its `experiments` member, which holds two
+mechane labs built on it. The workflow sits at the workspace root: one params file for both labs
+(see [several labs](#the-params-file)), a Snakefile and an analysis script. The labs are
+registered as [entry points](#registering-your-laboratory), so no `PYTHONPATH` is needed:
+
+```bash
+cd examples/radioactivity
+uv run --group workflow snakemake -c4
+```
+
+Abridged, the Snakefile's core is four rules; every rule after `setup` runs once per lab, through
+the `{lab}` wildcard:
 
 ```python
-rule setup:                       # expand the sweep, write the manifest
-    input: "params.py", "decay.py"
-    output: MANIFEST
-    shell: "mechane setup --params-file {input[0]}"
+LABS = ["decay", "half_life"]                # the ROOTs in params.py are outputs/<lab>
+MANIFEST = "outputs/{lab}/manifest.json"
 
-checkpoint make_plan:             # split the work into tasks
+rule setup:                       # expand both sweeps, write one manifest per lab
+    input: "experiments/src/radioactivity_experiments/families/decay.py", ..., params="params.py"
+    output: expand(MANIFEST, lab=LABS)
+    shell: "mechane setup --params-file {input.params}"   # not {input}: that is every input
+
+checkpoint make_plan:             # split a lab's work into tasks
     input: MANIFEST
-    output: PLAN
+    output: "outputs/{lab}/plan.json"     # in the lab's ROOT, next to its results
     shell: "mechane plan --manifest-path {input} --batch-size {BATCH_SIZE} --output {output} > /dev/null"
 
 rule run_task:                    # one Snakemake job per mechane task
-    input: PLAN
-    output: touch("done/task_{t}")
+    input: "outputs/{lab}/plan.json"
+    output: touch("outputs/{lab}/.snakemake-done/task_{t}")
     shell: "mechane run-plan --plan-file {input} --task-id {wildcards.t}"
 
-rule complete:                    # a gate: fails unless every instance is done
-    input: all_tasks
-    output: touch("done/complete")
-    shell: "mechane status --manifest-path {MANIFEST} --check"
+rule complete:                    # a gate: fails unless every instance of the lab is done
+    input: tasks=all_tasks, manifest=MANIFEST
+    output: touch("outputs/{lab}/.snakemake-done/complete")
+    shell: "mechane status --manifest-path {input.manifest} --check"
 ```
 
-The example then exports the results as a table (`mechane export`) and runs the analysis on it.
+The example then exports each lab's results as a table (`mechane export`) and runs the analysis
+on both tables.
 Things to know:
 
 - **Give Snakemake tasks, not instances.** One Snakemake job should run a mechane *task* of
@@ -637,11 +685,14 @@ Things to know:
   1.95 s, against 0.18 s in a single `run-batch`: about 160 ms of Python start-up per process,
   which matters when instances are short. Snakemake built a 5,000-job DAG in about 4 s in a dry
   run, so the number of jobs is not what hurts: the cost per job is.
-- **mechane is the source of truth for "done".** Snakemake's `done/task_N` files only mean "this
-  task ran without failures". If you delete results or run `mechane clean` behind Snakemake's
-  back, it does not notice, and `snakemake` says "Nothing to be done". Tell it with
-  `snakemake --forcerun run_task`: that is cheap, because mechane skips finished instances. The
-  `complete` gate then confirms that everything really is done.
+- **mechane is the source of truth for "done".** Snakemake's task markers only mean "this task
+  ran without failures". Keep them, and the plan, inside the lab's `ROOT` as above: then moving or
+  deleting a lab's results takes its markers along, and Snakemake reruns the tasks by itself
+  (`mechane doctor` ignores hidden directories and plain files there). If you remove results
+  *inside* a lab's folder (`mechane clean`), the markers stay and `snakemake` says "Nothing to be
+  done". Tell it with `snakemake --forcerun run_task`: that is cheap, because mechane skips
+  finished instances. The example also runs `status --check` again before exporting, so a stale
+  marker never produces an incomplete table.
 - **Failures stop the pipeline.** `run-plan` exits 1 when any instance of its task failed, so the
   job fails and nothing downstream runs. Look with `mechane errors` and `mechane doctor`, fix the
   code, and run `snakemake` again: the failed tasks run again.
@@ -937,9 +988,9 @@ likewise importable but not part of the top-level API.
 - **`run` and `run-batch` accept instance ids past `num_instances`.** See
   [Command-line reference](#command-line-reference); `doctor` and `clean --what stray` deal with
   the leftovers.
-- **Input validation is uneven.** A non-integer in `--instance-ids` (`1,a`) and a params file
-  without `ROOT` or `PARAMS` end in a Python traceback (`ValueError`, `AttributeError`) instead of a
-  usage message. A missing `LABORATORY` is reported properly.
+- **Input validation is uneven.** A non-integer in `--instance-ids` (`1,a`) ends in a Python
+  traceback (`ValueError`) instead of a usage message. A params file that lacks `ROOT`,
+  `LABORATORY` or `PARAMS` is reported properly.
 - **Enum fields inside generics are not coerced** (see
   [How results are organized](#how-results-are-organized)).
 - **No `--version` option.** `pip show mechane` reports the installed version, and every result
@@ -968,7 +1019,7 @@ likewise importable but not part of the top-level API.
 
 | Symptom | Cause and fix |
 |---|---|
-| `ModuleNotFoundError: my_lab` when running `mechane …` | The console script does not put the current directory on `sys.path`. Install your lab as a package, or `export PYTHONPATH=$PWD` (and do the same in your job script; the Snakemake example sets it with `shell.prefix`). |
+| `ModuleNotFoundError: my_lab` when running `mechane …` | The console script does not put the current directory on `sys.path`. Install your lab as a package (the example project does, as a uv workspace member), or `export PYTHONPATH=$PWD` (and do the same in your job script). |
 | `… is not importable by reference` at `setup` | The lab is defined in `__main__` or a local scope. Move it to an importable module. |
 | `Experiments N and M map to the same directory` | They differ only in `hash_exclude` fields, or the sweep repeats a point. Remove the duplicate or make the differing field part of the hash. |
 | `Unknown configs keys […]` | A top-level key in `PARAMS` is not `seed`, `num_instances` or a section name. Check for a typo. |
@@ -985,12 +1036,13 @@ likewise importable but not part of the top-level API.
 | A type checker reports `Object of type Config has no attribute …` | You used the `config.<section>` shortcut. Use the typed path `config.configs.<section>`. |
 | An instance keeps being skipped after a code fix | Finished instances are skipped by design. Use `--overwrite`, remove the results with `mechane clean --what results --experiment-id N --yes`, or version your config so the result gets a new directory. |
 | `ValueError: invalid literal for int()` from `run-batch` | `--instance-ids` takes comma-separated integers (`0,1,2`). `plan` and `run-plan` avoid writing ids by hand. |
-| `AttributeError: module 'external_params' has no attribute 'ROOT'` | The params file must define `ROOT`, `LABORATORY` and `PARAMS`. |
+| `Error: … must define ROOT and PARAMS` (or `LABORATORY`) | The params file, or an entry of its `LABS`, must define `ROOT`, `LABORATORY` and `PARAMS`. |
+| `Error: … LABS[0] and LABS[1] have the same ROOT` | Two labs of a `LABS` file would share a manifest. Give each its own `ROOT`, for example `RESULTS / "a"` and `RESULTS / "b"`. |
 | `Error: unknown parameter 'x'; available: […]` | A `--where` key must be a dotted parameter as in the manifest (or `seed`, `num_instances`, `experiment_id`). `mechane list --all` shows the parameters. |
 | `Error: task id N is out of range: the plan has M task(s)` | The scheduler ran more tasks than the plan has. Task ids go from 0 to the number of tasks minus one, which the first line of `mechane plan` shows; use the plan file the job was given. |
 | `Error: refusing to remove the results of every experiment` | `clean --what results` needs `--experiment-id` or `--where`, or `--all-experiments`. |
 | `NOT reproduced: the replay differs from the stored result` | The code changed since the instance ran (`mechane doctor` shows mixed code versions), the computation is not deterministic, or the difference is numerical noise that `--rtol` would absorb. |
-| Snakemake says `Nothing to be done` although results were deleted or cleaned | Its `done/` files do not know about that. Run `snakemake --forcerun run_task` (cheap: finished instances are skipped). |
+| Snakemake says `Nothing to be done` although results were deleted or cleaned | Its task markers do not know about that. Run `snakemake --forcerun run_task` (cheap: finished instances are skipped). Keeping the markers inside each lab's `ROOT`, as the example does, makes moving or deleting a lab's folder rerun its tasks by itself. |
 | `Cannot serialize … to JSON` | A parameter or output is a type `to_jsonable` doesn't know. Convert it to a plain type before returning it. |
 
 ## Development
@@ -1010,6 +1062,10 @@ of lines and branches. Lint, format and type checks are `ruff` and `ty`.
 CI runs the lint and type checks, the tests on Linux and macOS, and builds the wheel and
 smoke-tests the `mechane` command in a clean environment.
 
+The example project in `examples/radioactivity/` is a uv workspace with its own `uv.lock`, which
+records mechane's metadata. After changing mechane's `pyproject.toml`, run
+`uv lock --directory examples/radioactivity` as well; CI checks that this lock is up to date.
+
 Releases are automatic. After CI succeeds on `main`, the release workflow tags and publishes a
 GitHub release: if the version in `pyproject.toml` has no tag yet it is released as it is,
 otherwise the patch version is bumped (put `#minor` or `#major` in a commit message since the last
@@ -1026,7 +1082,7 @@ src/mechane/
     laboratory.py      Laboratory: sweep expansion, manifest content, setup, aggregation
     manifest.py        read_manifest, load_laboratory
     registry.py        "module:Class" and entry-point resolution of a Laboratory
-    params.py          load_params_file: ROOT / LABORATORY / PARAMS
+    params.py          load_params_file, load_labs: ROOT / LABORATORY / PARAMS, or LABS
     runner.py          run_instance, run_batch: skip, execute, save, record failures
     selection.py       --experiment-id / --where: choosing experiments
     plan.py            plans: which instances each task runs (build, save, read)
@@ -1054,7 +1110,9 @@ src/mechane/
                        run_plan, errors, doctor, stats, list_experiments, replay, shell, export,
                        clean, init)
 examples/
-  snakemake/           a project that uses mechane with Snakemake: lab, sweep, Snakefile, analysis
+  radioactivity/       a research project as a uv workspace: the science package and an
+                       `experiments` member with two labs; at the root, the workflow (one params
+                       file, a Snakefile, analysis)
 tests/
   toy.py               a minimal non-trivial lab, a template for new ones
   conftest.py          fixtures: `register_laboratory`, a set-up two-experiment `lab`, helpers
@@ -1071,7 +1129,7 @@ tests/
   test_selection.py, test_plan.py, test_errors.py, test_doctor.py, test_stats.py,
   test_listing.py, test_replay.py, test_export.py, test_clean.py, test_scaffold.py
                        the logic of each newer command, in `core`
-  test_examples.py     the Snakemake example keeps working (lab, analysis, mechane calls)
+  test_examples.py     the example project keeps working (workspace, labs, analysis, Snakefile)
   test_architecture.py the layering rules below, enforced on the imports
 ```
 
