@@ -4,30 +4,45 @@ A small project that uses both tools. `mechane` decides *what* runs and where th
 (seeds, directories, which instances are done); Snakemake decides the *order* of the stages and,
 on a cluster, how jobs are submitted. mechane itself needs no scheduler settings.
 
+The params file defines **two labs**, each with its own sweep, seed and number of instances:
+`decay` estimates the fraction of atoms that survive to time `t`, and `half_life` estimates the
+half-life. `mechane setup` sets up both; every later stage runs once per lab.
+
 ```bash
 pip install mechane snakemake
 cd examples/snakemake
 snakemake -c4          # runs everything, 4 jobs at a time
-cat results/summary.txt
+cat outputs/summary.txt
 ```
 
 | File | What it is |
 |---|---|
-| `decay.py` | The laboratory: Monte Carlo radioactive decay. Replace it with your own. |
-| `params.py` | The sweep (`ROOT`, `LABORATORY`, `PARAMS`). |
+| `decay.py` | The two laboratories, `DecayLab` and `HalfLifeLab`: Monte Carlo radioactive decay. Replace them with your own. |
+| `params.py` | The two labs and their sweeps (`LABS`: a `ROOT`, `LABORATORY` and `PARAMS` per lab). |
 | `Snakefile` | The stages, below. |
-| `summarize.py` | The analysis: compares the estimates with the exact answer `exp(-rate * t)`. |
+| `summarize.py` | The analysis: compares the estimates with the exact answers, `exp(-rate * t)` and `ln 2 / rate`. |
 
 ## The stages
 
 | Rule | Runs | Why a separate stage |
 |---|---|---|
-| `setup` | `mechane setup` | Expands the sweep and writes the manifest. Re-runs when `params.py` or `decay.py` change. |
-| `make_plan` | `mechane plan` | Splits the work into tasks. It is a *checkpoint*: how many tasks there are is only known once the manifest exists. |
+| `setup` | `mechane setup` | Expands both sweeps and writes one manifest per lab, `outputs/<lab>/manifest.json`. Re-runs when `params.py` or `decay.py` change. |
+| `make_plan` | `mechane plan` | Splits a lab's work into tasks, `plans/<lab>.json`. It is a *checkpoint*: how many tasks there are is only known once the manifest exists. |
 | `run_task` | `mechane run-plan` | One Snakemake job per mechane task. Finished instances are skipped. |
-| `complete` | `mechane status --check` | A gate: fails unless every instance of every experiment is done. |
-| `export` | `mechane export` | The results as a table, one row per instance. |
-| `summarize` | your script | Your analysis. |
+| `complete` | `mechane status --check` | A gate: fails unless every instance of every experiment of the lab is done. |
+| `export` | `mechane export` | A lab's results as a table, `outputs/<lab>.csv`, one row per instance. |
+| `summarize` | your script | Your analysis, of both tables. |
+
+Every rule after `setup` has a `{lab}` wildcard, so the two labs go through their stages
+independently, and the tasks of both labs run side by side. Snakemake stops starting new jobs
+after a failure; with `snakemake -c4 --keep-going` the other lab still finishes its own stages.
+
+## Adding a lab
+
+1. Add the lab to `LABS` in `params.py`, with its own `ROOT` under `outputs/`.
+2. Add the last part of that `ROOT` to `LABS` in the Snakefile: the per-lab rules find a lab's
+   manifest at `outputs/<lab>/manifest.json`.
+3. Tell `summarize.py` how to analyse its table (the `LABS` dict at the top).
 
 ## Things to know
 
@@ -43,7 +58,8 @@ cat results/summary.txt
 - **Failures.** `mechane run-plan` exits with status 1 when any instance of its task failed, so
   the job fails, and `complete`, `export` and `summarize` do not run. Look with `mechane errors`
   and `mechane doctor`, fix the code, and run `snakemake` again: the failed tasks run again.
-- **Changing the sweep.** Editing `params.py` re-runs `setup` and `make_plan`. Experiment ids are
+- **Changing the sweep.** Editing `params.py` re-runs `setup` and `make_plan` for every lab
+  (finished instances are still skipped). Experiment ids are
   positional, so adding a point in the middle renumbers them; the plan is regenerated for you, but
   do not reuse a plan file you saved by hand (see "Known limitations" in the main README).
 - **Clusters.** Snakemake runs jobs on a cluster through its executor plugins and profiles. The
