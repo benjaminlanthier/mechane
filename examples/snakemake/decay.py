@@ -1,11 +1,14 @@
-"""A small laboratory for the Snakemake example: Monte Carlo radioactive decay.
+"""Two small laboratories for the Snakemake example: Monte Carlo radioactive decay.
 
-Each instance draws the lifetime of `n_atoms` atoms from an exponential distribution and reports
-the fraction still alive at time `t`. The exact answer is exp(-rate * t), which `summarize.py`
-compares the estimates with.
+Each instance of either lab draws the lifetimes of `n_atoms` atoms from an exponential
+distribution. `DecayLab` reports the fraction still alive at time `t` (exact: exp(-rate * t));
+`HalfLifeLab` reports the median lifetime (exact: ln 2 / rate). `summarize.py` compares the
+estimates with these exact answers.
 """
 
 from dataclasses import dataclass
+
+import numpy as np
 
 from mechane import (
     Config,
@@ -58,3 +61,32 @@ class DecayLab(Laboratory):
     name = "decay"
     experiment_class = DecayExperiment
     instance_class = DecayInstance
+
+
+@dataclass(frozen=True)
+class HalfLifeConfigs(Configs):
+    decay: Decay
+
+
+@dataclass(frozen=True)
+class HalfLifeExperimentConfig(ExperimentConfig):
+    configs: HalfLifeConfigs
+
+
+class HalfLifeExperiment(Experiment):
+    config: HalfLifeExperimentConfig
+
+
+class HalfLifeInstance(Instance):
+    experiment: HalfLifeExperiment
+
+    def run(self):
+        decay = self.experiment.config.configs.decay
+        lifetimes = self.rng.exponential(1.0 / decay.rate, size=decay.n_atoms)
+        return InstanceOutput(outputs={"half_life": float(np.median(lifetimes))})
+
+
+class HalfLifeLab(Laboratory):
+    name = "half_life"
+    experiment_class = HalfLifeExperiment
+    instance_class = HalfLifeInstance
