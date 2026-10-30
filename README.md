@@ -501,7 +501,7 @@ layout of the aggregate itself, override `aggregate_instance_results()`.
 
 | Command | Purpose | Options |
 |---|---|---|
-| `setup` | Expand the sweep, write the manifest, create all instance directories | `--params-file` |
+| `setup` | Expand the sweep, write the manifest, create all instance directories (for each lab of a `LABS` file) | `--params-file` |
 | `run` | Run one instance | `--manifest-path`, `--experiment-id`, `--instance-id`, `--overwrite/--no-overwrite` |
 | `run-batch` | Run several instances of one experiment in one process | `--manifest-path`, `--experiment-id`, `--instance-ids 0,1,2`, `--overwrite/--no-overwrite`, `--continue-on-error/--fail-fast` |
 | `aggregate` | Collect results into `aggregated_results.json` | `--manifest-path` |
@@ -587,6 +587,37 @@ the current directory of every later command, so `status` run from another direc
 and `aggregate` reports no finished instances. Write `Path("results").resolve()`, as in the
 Quickstart; `doctor` warns about a relative root.
 
+**Several labs in one file.** Define `LABS` instead of the three names above: a list with one
+dict per lab, each with the keys `ROOT`, `LABORATORY` and `PARAMS`. Each lab keeps its own seed,
+number of instances and sweep, and may be a different `Laboratory` class:
+
+```python
+from pathlib import Path
+
+from mechane import grid
+
+RESULTS = Path("results").resolve()
+
+LABS = [
+    {
+        "ROOT": RESULTS / "short",
+        "LABORATORY": "my_lab:WalkLab",
+        "PARAMS": {"seed": 1, "num_instances": 1000, "walk": grid(dim=[1, 2, 3], n_steps=[100])},
+    },
+    {
+        "ROOT": RESULTS / "long",
+        "LABORATORY": "my_lab:WalkLab",
+        "PARAMS": {"seed": 2, "num_instances": 20, "walk": {"dim": 3, "n_steps": 10_000}},
+    },
+]
+```
+
+`mechane setup` sets up every lab and prints one line per lab. It expands every sweep before
+writing anything, so a mistake in one lab's sweep sets up none of them. Each lab gets its own
+`ROOT/manifest.json`, and every other command acts on one lab at a time through
+`--manifest-path`. Two labs cannot share a `ROOT`, because they would overwrite each other's
+manifest. A file defines either `LABS` or `ROOT`/`LABORATORY`/`PARAMS`, not both.
+
 ## Using mechane with Snakemake
 
 `mechane` does not submit jobs and knows nothing about schedulers. It gives schedulers and
@@ -604,32 +635,38 @@ in your project's Snakemake profile, not in mechane.
 | Which instances are done: finished ones are skipped, failures leave a traceback | Resources, retries, and submitting jobs to a cluster |
 | `status --check`, `doctor`, `errors`, `replay`: is it complete, consistent, reproducible? | Re-running only what is out of date |
 
-A complete, runnable project is in [`examples/snakemake/`](examples/snakemake/): a small Monte
-Carlo lab, its sweep, a Snakefile and an analysis script. Abridged, its core is four rules:
+A complete, runnable project is in [`examples/snakemake/`](examples/snakemake/): two small
+Monte Carlo labs defined in one params file (see [several labs](#the-params-file)), a Snakefile and
+an analysis script. Abridged, its core is four rules; every rule after `setup` runs once per lab,
+through the `{lab}` wildcard:
 
 ```python
-rule setup:                       # expand the sweep, write the manifest
+LABS = ["decay", "half_life"]                # the ROOTs in params.py are outputs/<lab>
+MANIFEST = "outputs/{lab}/manifest.json"
+
+rule setup:                       # expand both sweeps, write one manifest per lab
     input: "params.py", "decay.py"
-    output: MANIFEST
+    output: expand(MANIFEST, lab=LABS)
     shell: "mechane setup --params-file {input[0]}"
 
-checkpoint make_plan:             # split the work into tasks
+checkpoint make_plan:             # split a lab's work into tasks
     input: MANIFEST
-    output: PLAN
+    output: "plans/{lab}.json"
     shell: "mechane plan --manifest-path {input} --batch-size {BATCH_SIZE} --output {output} > /dev/null"
 
 rule run_task:                    # one Snakemake job per mechane task
-    input: PLAN
-    output: touch("done/task_{t}")
+    input: "plans/{lab}.json"
+    output: touch("done/{lab}/task_{t}")
     shell: "mechane run-plan --plan-file {input} --task-id {wildcards.t}"
 
-rule complete:                    # a gate: fails unless every instance is done
-    input: all_tasks
-    output: touch("done/complete")
-    shell: "mechane status --manifest-path {MANIFEST} --check"
+rule complete:                    # a gate: fails unless every instance of the lab is done
+    input: tasks=all_tasks, manifest=MANIFEST
+    output: touch("done/{lab}/complete")
+    shell: "mechane status --manifest-path {input.manifest} --check"
 ```
 
-The example then exports the results as a table (`mechane export`) and runs the analysis on it.
+The example then exports each lab's results as a table (`mechane export`) and runs the analysis
+on both tables.
 Things to know:
 
 - **Give Snakemake tasks, not instances.** One Snakemake job should run a mechane *task* of
@@ -937,9 +974,9 @@ likewise importable but not part of the top-level API.
 - **`run` and `run-batch` accept instance ids past `num_instances`.** See
   [Command-line reference](#command-line-reference); `doctor` and `clean --what stray` deal with
   the leftovers.
-- **Input validation is uneven.** A non-integer in `--instance-ids` (`1,a`) and a params file
-  without `ROOT` or `PARAMS` end in a Python traceback (`ValueError`, `AttributeError`) instead of a
-  usage message. A missing `LABORATORY` is reported properly.
+- **Input validation is uneven.** A non-integer in `--instance-ids` (`1,a`) ends in a Python
+  traceback (`ValueError`) instead of a usage message. A params file that lacks `ROOT`,
+  `LABORATORY` or `PARAMS` is reported properly.
 - **Enum fields inside generics are not coerced** (see
   [How results are organized](#how-results-are-organized)).
 - **No `--version` option.** `pip show mechane` reports the installed version, and every result
@@ -985,7 +1022,8 @@ likewise importable but not part of the top-level API.
 | A type checker reports `Object of type Config has no attribute …` | You used the `config.<section>` shortcut. Use the typed path `config.configs.<section>`. |
 | An instance keeps being skipped after a code fix | Finished instances are skipped by design. Use `--overwrite`, remove the results with `mechane clean --what results --experiment-id N --yes`, or version your config so the result gets a new directory. |
 | `ValueError: invalid literal for int()` from `run-batch` | `--instance-ids` takes comma-separated integers (`0,1,2`). `plan` and `run-plan` avoid writing ids by hand. |
-| `AttributeError: module 'external_params' has no attribute 'ROOT'` | The params file must define `ROOT`, `LABORATORY` and `PARAMS`. |
+| `Error: … must define ROOT and PARAMS` (or `LABORATORY`) | The params file, or an entry of its `LABS`, must define `ROOT`, `LABORATORY` and `PARAMS`. |
+| `Error: … LABS[0] and LABS[1] have the same ROOT` | Two labs of a `LABS` file would share a manifest. Give each its own `ROOT`, for example `RESULTS / "a"` and `RESULTS / "b"`. |
 | `Error: unknown parameter 'x'; available: […]` | A `--where` key must be a dotted parameter as in the manifest (or `seed`, `num_instances`, `experiment_id`). `mechane list --all` shows the parameters. |
 | `Error: task id N is out of range: the plan has M task(s)` | The scheduler ran more tasks than the plan has. Task ids go from 0 to the number of tasks minus one, which the first line of `mechane plan` shows; use the plan file the job was given. |
 | `Error: refusing to remove the results of every experiment` | `clean --what results` needs `--experiment-id` or `--where`, or `--all-experiments`. |
@@ -1026,7 +1064,7 @@ src/mechane/
     laboratory.py      Laboratory: sweep expansion, manifest content, setup, aggregation
     manifest.py        read_manifest, load_laboratory
     registry.py        "module:Class" and entry-point resolution of a Laboratory
-    params.py          load_params_file: ROOT / LABORATORY / PARAMS
+    params.py          load_params_file, load_labs: ROOT / LABORATORY / PARAMS, or LABS
     runner.py          run_instance, run_batch: skip, execute, save, record failures
     selection.py       --experiment-id / --where: choosing experiments
     plan.py            plans: which instances each task runs (build, save, read)
@@ -1054,7 +1092,8 @@ src/mechane/
                        run_plan, errors, doctor, stats, list_experiments, replay, shell, export,
                        clean, init)
 examples/
-  snakemake/           a project that uses mechane with Snakemake: lab, sweep, Snakefile, analysis
+  snakemake/           a project that uses mechane with Snakemake: two labs in one params file,
+                       a Snakefile, analysis
 tests/
   toy.py               a minimal non-trivial lab, a template for new ones
   conftest.py          fixtures: `register_laboratory`, a set-up two-experiment `lab`, helpers
