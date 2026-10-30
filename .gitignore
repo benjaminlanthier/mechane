@@ -196,5 +196,6 @@ pyrightconfig.json
 
 examples/snakemake/.snakemake
 examples/snakemake/done
+examples/snakemake/plans
 examples/snakemake/outputs
 examples/snakemake/*.json
